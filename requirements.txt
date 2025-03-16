@@ -137,8 +137,8 @@ pytesseract==0.3.10
 python-dateutil==2.9.0.post0
 pytorch-lightning==2.5.0.post0
 pytorch-metric-learning==2.3.0
-pytz==2025.1
-pywin32==309
+# pytz==2025.1
+# pywin32==309
 PyYAML==6.0.2
 ray==2.39.0
 referencing==0.36.2
