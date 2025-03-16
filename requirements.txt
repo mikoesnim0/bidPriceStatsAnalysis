@@ -1,0 +1,16 @@
+
+setuptools
+wheel
+autogluon
+# autogluon.tabular
+# autogluon.core
+# autogluon.features
+pyarrow
+joblib
+tqdm
+numpy
+pandas
+scikit-learn
+matplotlib
+seaborn
+lightgbm
