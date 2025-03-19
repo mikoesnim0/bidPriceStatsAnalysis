@@ -7,9 +7,12 @@ import json
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
-from sklearn.model_selection import cross_val_score, KFold
+from sklearn.model_selection import cross_val_score, KFold, train_test_split
 import lightgbm as lgbm
 from datetime import datetime
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error, r2_score
+import logging
 
 # Try importing AutoGluon, but handle if not installed
 try:
@@ -25,8 +28,15 @@ from src.config import (
 )
 from src.data_processing import load_data, prepare_features
 from src.utils import setup_logger, save_pickle, save_json, timer, generate_timestamp
+from mongodb_handler import MongoDBHandler
+from init_dirs import init_directories
 
-logger = setup_logger(__name__)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+)
+logger = logging.getLogger(__name__)
 
 def train_lgbm_model(
     X_train: pd.DataFrame,
@@ -433,6 +443,232 @@ def train_single_target_model(
         logger.error(f"Error training model for {target_col}: {str(e)}")
         raise
 
+def prepare_train_test_data(df, target_prefix, test_size=0.2, random_state=42):
+    """
+    Prepare training and testing datasets.
+    
+    Parameters:
+        df (pd.DataFrame): The input DataFrame.
+        target_prefix (str): Prefix for target columns (e.g., "010", "020", "050", "100").
+        test_size (float): Proportion of the dataset to include in the test split.
+        random_state (int): Random seed for reproducibility.
+        
+    Returns:
+        tuple: (X_train, X_test, y_train, y_test) - Training and testing data splits.
+    """
+    logger.info(f"Preparing train/test split with target_prefix: {target_prefix}")
+    
+    # Get all columns that start with the target_prefix
+    target_cols = [col for col in df.columns if col.startswith(f"{target_prefix}_")]
+    
+    if not target_cols:
+        logger.error(f"❌ No target columns found with prefix '{target_prefix}_'")
+        raise ValueError(f"❌ No target columns found with prefix '{target_prefix}_'")
+    
+    # All other columns except target columns and '공고번호' will be features
+    feature_cols = [col for col in df.columns if not col.startswith(tuple([f"{prefix}_" for prefix in ["010", "020", "050", "100"]])) and col != "공고번호"]
+    
+    logger.info(f"Number of feature columns: {len(feature_cols)}")
+    logger.info(f"Number of target columns: {len(target_cols)}")
+    
+    # Prepare X and y
+    X = df[feature_cols].copy()
+    y = df[target_cols].copy()
+    
+    # Split data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state)
+    
+    logger.info(f"Training data shape: {X_train.shape}")
+    logger.info(f"Testing data shape: {X_test.shape}")
+    
+    return X_train, X_test, y_train, y_test, feature_cols, target_cols
+
+def train_random_forest(X_train, y_train, n_estimators=100, random_state=42):
+    """
+    Train a Random Forest model.
+    
+    Parameters:
+        X_train (pd.DataFrame): Training features.
+        y_train (pd.DataFrame): Training targets.
+        n_estimators (int): Number of trees in the forest.
+        random_state (int): Random seed for reproducibility.
+        
+    Returns:
+        dict: Dictionary of trained models for each target column.
+    """
+    logger.info(f"Training Random Forest models with {n_estimators} estimators")
+    
+    models = {}
+    
+    for col in y_train.columns:
+        logger.info(f"Training model for target: {col}")
+        
+        # Create and train model
+        model = RandomForestRegressor(n_estimators=n_estimators, random_state=random_state, n_jobs=-1)
+        model.fit(X_train, y_train[col])
+        
+        # Store model
+        models[col] = model
+        
+        logger.info(f"Model for {col} trained successfully")
+    
+    logger.info(f"Trained {len(models)} models")
+    return models
+
+def evaluate_models(models, X_test, y_test):
+    """
+    Evaluate trained models on test data.
+    
+    Parameters:
+        models (dict): Dictionary of trained models.
+        X_test (pd.DataFrame): Test features.
+        y_test (pd.DataFrame): Test targets.
+        
+    Returns:
+        dict: Dictionary of evaluation metrics for each model.
+    """
+    logger.info("Evaluating models on test data")
+    
+    results = {}
+    
+    for col, model in models.items():
+        # Make predictions
+        y_pred = model.predict(X_test)
+        
+        # Calculate metrics
+        mse = mean_squared_error(y_test[col], y_pred)
+        rmse = np.sqrt(mse)
+        r2 = r2_score(y_test[col], y_pred)
+        
+        # Store results
+        results[col] = {
+            'mse': mse,
+            'rmse': rmse,
+            'r2': r2
+        }
+        
+        logger.info(f"Model {col}: RMSE = {rmse:.6f}, R² = {r2:.6f}")
+    
+    # Calculate average performance across all models
+    avg_rmse = np.mean([result['rmse'] for result in results.values()])
+    avg_r2 = np.mean([result['r2'] for result in results.values()])
+    
+    logger.info(f"Average performance: RMSE = {avg_rmse:.6f}, R² = {avg_r2:.6f}")
+    
+    return results
+
+def save_models(models, model_dir, dataset_key, target_prefix):
+    """
+    Save trained models to disk.
+    
+    Parameters:
+        models (dict): Dictionary of trained models.
+        model_dir (str): Directory to save models.
+        dataset_key (str): Dataset key (e.g., "DataSet_3").
+        target_prefix (str): Prefix for target columns.
+        
+    Returns:
+        list: Paths to saved model files.
+    """
+    logger.info(f"Saving {len(models)} models to {model_dir}")
+    
+    # Create directory if it doesn't exist
+    os.makedirs(model_dir, exist_ok=True)
+    
+    model_paths = []
+    
+    for col, model in models.items():
+        # Create filename
+        filename = f"{dataset_key}_{target_prefix}_{col.split('_')[-1]}.pkl"
+        filepath = os.path.join(model_dir, filename)
+        
+        # Save model
+        with open(filepath, 'wb') as f:
+            pickle.dump(model, f)
+        
+        model_paths.append(filepath)
+        logger.info(f"Model saved to {filepath}")
+    
+    return model_paths
+
+def train_models(dataset_key="DataSet_3", target_prefix="100", test_size=0.2, n_estimators=100, random_state=42):
+    """
+    Train models for a specific dataset and target prefix.
+    
+    Parameters:
+        dataset_key (str): Dataset key to use (e.g., "DataSet_3", "DataSet_2").
+        target_prefix (str): Prefix for target columns (e.g., "010", "020", "050", "100").
+        test_size (float): Proportion of the dataset to include in the test split.
+        n_estimators (int): Number of trees in the Random Forest.
+        random_state (int): Random seed for reproducibility.
+        
+    Returns:
+        tuple: (models, results, model_paths) - Trained models, evaluation results, and saved model paths.
+    """
+    logger.info(f"Training models for {dataset_key} with target prefix {target_prefix}")
+    
+    # Initialize directories
+    init_directories()
+    
+    # Load data from MongoDB
+    with MongoDBHandler() as mongo_handler:
+        collection_names = mongo_handler.get_default_collection_names()
+        datasets = mongo_handler.load_datasets({dataset_key: collection_names[dataset_key]})
+    
+    df = datasets[dataset_key]
+    logger.info(f"Loaded {dataset_key} with shape: {df.shape}")
+    
+    # Prepare train/test data
+    X_train, X_test, y_train, y_test, feature_cols, target_cols = prepare_train_test_data(
+        df, target_prefix, test_size, random_state
+    )
+    
+    # Train models
+    models = train_random_forest(X_train, y_train, n_estimators, random_state)
+    
+    # Evaluate models
+    results = evaluate_models(models, X_test, y_test)
+    
+    # Save models
+    model_dir = os.path.join("models", dataset_key.lower())
+    model_paths = save_models(models, model_dir, dataset_key.lower(), target_prefix)
+    
+    # Save feature columns list for future reference
+    feature_path = os.path.join(model_dir, f"{dataset_key.lower()}_features.pkl")
+    with open(feature_path, 'wb') as f:
+        pickle.dump(feature_cols, f)
+    
+    logger.info(f"Feature columns saved to {feature_path}")
+    
+    return models, results, model_paths
+
+def train_all_models():
+    """
+    Train models for all datasets and target prefixes.
+    """
+    logger.info("Training all models")
+    
+    # Define datasets and target prefixes
+    datasets = ["DataSet_3", "DataSet_2"]
+    target_prefixes = ["010", "020", "050", "100"]
+    
+    all_results = {}
+    
+    for dataset_key in datasets:
+        all_results[dataset_key] = {}
+        
+        for target_prefix in target_prefixes:
+            logger.info(f"Training {dataset_key} with target prefix {target_prefix}")
+            
+            try:
+                _, results, _ = train_models(dataset_key, target_prefix)
+                all_results[dataset_key][target_prefix] = results
+            except Exception as e:
+                logger.error(f"❌ Failed to train {dataset_key} with {target_prefix}: {e}")
+    
+    logger.info("All model training completed")
+    return all_results
+
 def main():
     """Main function to train models."""
     try:
@@ -480,4 +716,16 @@ def main():
         raise
 
 if __name__ == "__main__":
-    main() 
+    try:
+        all_results = train_all_models()
+        
+        # Print summary
+        for dataset_key, prefixes in all_results.items():
+            for prefix, results in prefixes.items():
+                avg_rmse = np.mean([result['rmse'] for result in results.values()])
+                avg_r2 = np.mean([result['r2'] for result in results.values()])
+                print(f"{dataset_key} - {prefix}: Avg RMSE = {avg_rmse:.6f}, Avg R² = {avg_r2:.6f}")
+    
+    except Exception as e:
+        logger.error(f"❌ Model training failed: {e}")
+        raise 

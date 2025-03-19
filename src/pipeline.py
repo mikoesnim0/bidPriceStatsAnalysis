@@ -1,7 +1,7 @@
 # 데이터 파이프라인
 
 ## 함수목록
-
+"""
 - transform
 - restructure_data
 - parse_sajeong_rate
@@ -24,7 +24,7 @@
 - extract_bounds
 - process_row_fixed_bins
 - data_to_target
-
+"""
 
 ### 로그 변환
 
@@ -596,7 +596,7 @@ def restructure_data(df1, df2):
     bd_df["사정률"] = parse_sajeong_rate(bd_df["기초대비 사정률(%)"])
     bd_df.dropna(subset=["사정률"], inplace=True)
     bd_df = bd_df[["공고번호", "사정률"]]
-    bd_df = group_to_list(bd_df, "공고번호", "사정률")
+    bd_df = group_to_list(bd_df, "공고번호", "사정률") AZ                                                                                                                                                     """""""/                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
 
     # 문자열 컬럼 정리 (공백 제거)
     str_columns = ["예가범위", "발주처(수요기관)", "지역제한", "공고구분표시"]

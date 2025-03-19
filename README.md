@@ -1,269 +1,225 @@
-<<<<<<< HEAD
-# bidPriceStatsAnalysis
-=======
-# BidPrice Prediction Model
+# 입찰가 데이터 분석 파이프라인
 
-이 프로젝트는 입찰가격(BidPrice) 예측을 위한 머신러닝 모델 파이프라인입니다. AutoGluon 라이브러리를 활용하여 다수의 타겟 변수(최대 180개)에 대한 효율적인 모델링을 수행합니다.
+입찰 공고 및 입찰가 데이터를 전처리하고 분석하는 파이프라인입니다. 원시 데이터를 로드하여 정제, 변환, 특성 엔지니어링 과정을 거쳐 MongoDB에 저장하는 전체 과정을 자동화합니다.
 
-> [!NOTE]
-> 이 프로젝트는 Python 3.8 이상이 필요하며, GPU 가속 기능을 지원합니다.
+## 주요 기능
 
-## 프로젝트 구조
+- **데이터 로드**: 다양한 형식(CSV, Excel, JSON)의 원시 데이터 파일 로드
+- **데이터 정제**: 결측치 처리, 중복 제거, 이상치 탐지 및 처리
+- **데이터 변환**: 로그 변환, 정규화, 원-핫 인코딩 등
+- **특성 엔지니어링**: 텍스트 특성 추출, 차원 축소, 특성 조합
+- **입찰가 특화 처리**: 입찰가 관련 특성 자동 생성
+- **MongoDB 저장**: 전처리된 데이터를 MongoDB에 저장
+- **파이프라인 시각화**: 전체 파이프라인 과정 시각화 및 보고서 생성
 
-```mermaid
-graph TD
-    A[BidPrice Prediction Model] --> B[데이터 처리]
-    A --> C[모델 학습]
-    A --> D[모델 평가]
-    A --> E[예측]
-    
-    B --> B1[data/]
-    C --> C1[models/]
-    D --> D1[results/]
-    
-    subgraph 주요 모듈
-        F[src/data_processing.py]
-        G[src/train.py]
-        H[src/evaluate.py]
-        I[src/predict.py]
-        J[src/config.py]
-        K[src/utils.py]
-    end
-    
-    subgraph 실행 스크립트
-        L[main.py]
-    end
-```
+## 시스템 요구사항
 
-프로젝트는 다음과 같은 디렉토리 구조로 구성됩니다:
-
-- `data/` - 원본 및 전처리된 데이터 파일
-- `models/` - 학습된 모델 파일
-- `results/` - 평가 결과 및 시각화 이미지
-- `src/` - 소스 코드 모듈
-- `tests/` - 테스트 코드
-- `main.py` - 메인 실행 스크립트
-- `requirements.txt` - 필요 패키지 목록
+- Python 3.8 이상
+- MongoDB 4.4 이상
+- 필수 라이브러리: 아래 설치 방법 참조
 
 ## 설치 방법
 
-<details>
-<summary>설치 단계 보기</summary>
+### 1. 저장소 복제
 
-1. Python 3.8 이상 설치
-2. 필요 패키지 설치:
+```bash
+git clone <repository-url>
+cd bidPriceStatsAnalysis
+```
+
+### 2. 가상환경 설정
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+```
+
+### 3. 필수 패키지 설치
 
 ```bash
 pip install -r requirements.txt
 ```
 
-또는 주요 패키지 직접 설치:
+### 4. 환경 변수 설정
+
+`.env` 파일에 필요한 환경 변수를 설정합니다:
+
+```
+# MongoDB Connection Settings
+MONGO_URI=mongodb://admin:password@localhost:27017/gfcon?authSource=admin
+MONGO_DB=gfcon
+MONGO_COLLECTION_PREFIX=preprocessed
+
+# Data Directory
+DATA_DIR=./data/raw
+```
+
+## 사용 방법
+
+### 1. 샘플 데이터 생성
+
+테스트를 위한 샘플 데이터를 생성합니다:
 
 ```bash
-pip install autogluon pandas numpy matplotlib seaborn scikit-learn tqdm
-```
-</details>
-
-## 기본 워크플로우
-
-```mermaid
-flowchart LR
-    A[데이터 전처리] --> B[모델 학습]
-    B --> C[모델 평가]
-    C --> D[예측]
-    
-    style A fill:#f9f,stroke:#333,stroke-width:2px
-    style B fill:#bbf,stroke:#333,stroke-width:2px
-    style C fill:#bfb,stroke:#333,stroke-width:2px
-    style D fill:#fbb,stroke:#333,stroke-width:2px
+python src/generate_sample_data.py --bid-records 100 --notice-records 150
 ```
 
-### 전체 파이프라인 실행
+옵션:
+- `--bid-records`: 생성할 입찰 데이터 레코드 수
+- `--notice-records`: 생성할 공고 데이터 레코드 수
+- `--output-dir`: 출력 디렉토리 경로
+- `--skip-bid`: 입찰 데이터 생성 건너뛰기
+- `--skip-notice`: 공고 데이터 생성 건너뛰기
+
+### 2. 전처리 파이프라인 실행
+
+데이터 전처리 및 MongoDB 업로드를 실행합니다:
 
 ```bash
-python main.py
+python src/preprocess_upload_mongo.py --file-pattern="*.csv" --generate-report
 ```
 
-### 데이터 전처리만 실행
+옵션:
+- `--data-dir`: 데이터 디렉토리 경로
+- `--file-pattern`: 처리할 파일 패턴 (기본값: *.csv)
+- `--output-dir`: 결과 저장 디렉토리
+- `--skip-upload`: MongoDB 업로드 건너뛰기
+- `--check-only`: MongoDB 데이터 확인만 수행
+- `--clear-db`: 기존 MongoDB 컬렉션 제거 후 새로 저장
+- `--generate-report`: 파이프라인 보고서 생성
+- `--show-visualization`: 파이프라인 시각화 표시
+
+### 3. MongoDB 데이터 확인
+
+MongoDB에 저장된 데이터를 확인합니다:
 
 ```bash
-python main.py --data-only
+python src/preprocess_upload_mongo.py --check-only
 ```
 
-### 모델 학습만 실행
+## 파이프라인 데이터 흐름
 
-```bash
-python main.py --train-only
-```
+### 입력 데이터
 
-### 모델 평가만 실행
+파이프라인은 두 가지 주요 데이터 유형을 처리합니다:
 
-```bash
-python main.py --evaluate-only
-```
+1. **입찰 데이터 (bid_data_*.csv)**
+   - 필수 컬럼: `공고번호`, `기초금액`, `예정금액`, `투찰가` 등
+   - 특징: 실제 입찰 정보, 낙찰 정보 포함
 
-## 터미널 출력 및 진행 상황 표시
+2. **공고 데이터 (notice_data_*.csv)**
+   - 필수 컬럼: `공고번호`, `기초금액`, `공고제목`, `공고내용` 등
+   - 특징: 공고 정보, 발주처 정보 포함
 
-파이프라인 실행 시 터미널에 진행 상황이 시각적으로 표시됩니다. 각 단계별로 진행바가 표시되어 처리 상태를 실시간으로 확인할 수 있습니다.
-
-### 예시 출력
+### 처리 단계별 변환
 
 ```
-🚀 BidPrice 예측 파이프라인을 시작합니다...
-
-📊 데이터 전처리 단계를 시작합니다...
-📊 데이터 전처리:  60%|██████    | 3/5 [00:23<00:15,  7.67s/it]
-
-✅ 데이터 전처리 완료! 학습 데이터: (13182, 24), 테스트 데이터: (3296, 24)
-
-🧠 모델 학습 단계를 시작합니다...
-🧠 [3/30] 020_003 학습 중:  10%|█         | 3/30 [06:47<1:01:02, 135.64s/it]
-  🔥 GPU를 사용하여 020_003 학습 중...
+원시 데이터 파일 → 데이터 로드 → 데이터 정제 → 데이터 변환 → 특성 엔지니어링 → 입찰가 특화 처리 → MongoDB 저장
 ```
 
-### 추가 설정
+각 단계에서 다음과 같은 변환이 이루어집니다:
 
-터미널 출력 상세 수준을 조정할 수 있습니다:
+1. **데이터 로드**
+   - CSV, Excel, JSON 등 다양한 형식 지원
+   - 컬럼 이름, 데이터 타입 자동 감지
 
-```bash
-python main.py --verbose 0  # 간략한 출력 (진행바만 표시)
-python main.py --verbose 1  # 기본 출력 (기본값)
-python main.py --verbose 2  # 상세 출력 (하위 단계까지 표시)
+2. **데이터 정제**
+   - 결측치 처리: 필수 컬럼은 행 제거, 나머지는 적절한 값으로 대체
+   - 중복 제거: `공고번호` 기준으로 중복 행 제거
+   - 이상치 탐지 및 처리: 금액 컬럼의 이상치 조정
+
+3. **데이터 변환**
+   - 로그 변환: `기초금액`, `예정금액`, `투찰가` 등에 자연로그 적용
+   - 정규화: 수치형 컬럼에 표준화 적용
+   - 원-핫 인코딩: 범주형 변수에 적용
+
+4. **특성 엔지니어링**
+   - 텍스트 특성 추출: `공고제목`, `공고내용`에서 TF-IDF 특성 추출
+   - 차원 축소: PCA를 통한 수치형 특성 차원 축소
+   - 특성 조합: 기존 특성을 조합하여 새로운 특성 생성
+
+5. **입찰가 특화 처리**
+   - 낙찰가격비율: `투찰가/예정금액` 계산
+   - 예정가비율: `예정금액/기초금액` 계산
+   - 기타 입찰가 관련 비율 특성 생성
+
+6. **MongoDB 저장**
+   - 데이터셋 유형별 컬렉션 저장:
+     - `preprocessed_3`: 3개 이상 입찰건 참여 업체 데이터
+     - `preprocessed_2`: 2개 입찰건 참여 업체 데이터
+     - `preprocessed_etc`: 기타 데이터
+
+### 출력 데이터
+
+전처리 결과는 MongoDB에 다음과 같은 구조로 저장됩니다:
+
+- **데이터베이스**: `gfcon` (환경 변수에서 설정 가능)
+- **컬렉션**: `preprocessed_3`, `preprocessed_2`, `preprocessed_etc`
+- **문서 구조**:
+  - 원본 컬럼: `공고번호`, `공고제목` 등
+  - 변환 컬럼: `norm_log_기초금액`, `norm_log_예정금액` 등
+  - 생성 특성: `낙찰가격비율`, `예정가비율`, `입찰일자_year` 등
+  - 임베딩 특성: `TFIDF_공고제목_*`, `PCA_*` 등
+
+## 프로젝트 구조
+
+```
+bidPriceStatsAnalysis/
+├── data/
+│   ├── raw/                  # 원시 데이터 저장
+│   └── processed/            # 중간 처리 결과 (필요시)
+├── results/                  # 결과 저장 (보고서, 시각화 등)
+├── src/
+│   ├── preprocessing/        # 전처리 모듈
+│   │   ├── cleaner.py        # 데이터 정제
+│   │   ├── transformer.py    # 데이터 변환
+│   │   └── feature_eng.py    # 특성 엔지니어링
+│   ├── data_loader.py        # 데이터 로드
+│   ├── mongodb_handler.py    # MongoDB 연결 및 처리
+│   ├── preprocess_pipeline.py # 메인 파이프라인
+│   ├── preprocess_upload_mongo.py # 실행 스크립트
+│   ├── pipeline_visualizer.py # 파이프라인 시각화
+│   └── generate_sample_data.py # 샘플 데이터 생성
+├── .env                      # 환경 변수
+├── README.md                 # 사용 설명서
+└── requirements.txt          # 필수 패키지
 ```
 
-## 커맨드라인 옵션
+## 파이프라인 확장
 
-| 옵션 | 설명 | 기본값 |
-|------|------|--------|
-| `--data-only` | 데이터 전처리만 실행 | False |
-| `--train-only` | 모델 학습만 실행 | False |
-| `--evaluate-only` | 모델 평가만 실행 | False |
-| `--num-targets N` | 처리할 타겟 컬럼 수 | 전체 |
-| `--gpu BOOL` | GPU 사용 여부 | True |
-| `--models LIST` | 사용할 모델 목록 (콤마로 구분) | 전체 모델 |
-| `--preset PRESET` | AutoGluon 프리셋 | medium_quality_faster_train |
-| `--verbose N` | 출력 상세 수준 (0: 간략, 1: 기본, 2: 상세) | 1 |
+이 파이프라인은 다음과 같은 방식으로 확장할 수 있습니다:
 
-## 사용 예시
+1. **새로운 전처리 기법 추가**
+   - `src/preprocessing/` 디렉토리의 적절한 파일에 새 메서드 추가
+   - `preprocess_pipeline.py`에서 설정 및 호출 로직 업데이트
 
-<details>
-<summary>처음 30개 타겟에 대해서만 학습</summary>
+2. **새로운 데이터 유형 지원**
+   - `preprocess_pipeline.py`의 `_default_config` 메서드에 데이터 유형 추가
+   - 필요한 전처리 단계 정의
 
-```bash
-python main.py --train-only --num-targets 30
-```
-</details>
+3. **추가 분석 기능**
+   - 새로운 분석 스크립트를 추가하여 MongoDB에서 데이터 로드 및 분석
 
-<details>
-<summary>CPU만 사용하여 학습</summary>
+## 문제 해결
 
-```bash
-python main.py --train-only --gpu False
-```
-</details>
+### MongoDB 연결 문제
 
-<details>
-<summary>특정 모델만 사용하여 학습</summary>
+- MongoDB가 실행 중인지 확인
+- `.env` 파일의 연결 정보가 올바른지 확인
+- 방화벽 설정 확인
+- `mongo` 명령어로 직접 연결 테스트
 
-```bash
-python main.py --train-only --models XGB,RF
-```
-</details>
+### 데이터 처리 오류
 
-<details>
-<summary>고품질 설정으로 학습 (시간 오래 걸림)</summary>
+- 필수 컬럼이 원시 데이터에 존재하는지 확인
+- 데이터 타입 변환 문제가 없는지 확인
+- 파일 인코딩 문제 확인 (UTF-8 권장)
 
-```bash
-python main.py --train-only --preset best_quality
-```
-</details>
+### 공간 문제
 
-<details>
-<summary>일부 타겟에 대해서만 평가</summary>
+- 대용량 데이터 처리 시 디스크 공간 확인
+- MongoDB 저장 공간 확인
 
-```bash
-python main.py --evaluate-only --num-targets 50
-```
-</details>
+## 라이선스
 
-## 활용 시나리오
-
-### 단계적 개발 프로세스
-
-```mermaid
-stateDiagram-v2
-    [*] --> 데이터전처리
-    데이터전처리 --> 파일럿학습: 10개 타겟
-    파일럿학습 --> 파일럿평가
-    파일럿평가 --> 전체학습: 검증 후
-    전체학습 --> 전체평가
-    전체평가 --> [*]
-```
-
-1. 데이터 전처리
-   ```bash
-   python main.py --data-only
-   ```
-
-2. 일부 타겟 모델 학습 (파일럿)
-   ```bash
-   python main.py --train-only --num-targets 10
-   ```
-
-3. 파일럿 모델 평가
-   ```bash
-   python main.py --evaluate-only --num-targets 10
-   ```
-
-4. 전체 타겟 모델 학습
-   ```bash
-   python main.py --train-only
-   ```
-
-5. 전체 모델 평가
-   ```bash
-   python main.py --evaluate-only
-   ```
-
-## 메모리 관리 및 성능 최적화
-
-> [!TIP]
-> 대규모 데이터셋에서는 타겟 수 제한과 경량 모델 사용으로 메모리 사용량을 줄일 수 있습니다.
-
-### 메모리 부족 시 대처
-
-- 타겟 수 제한: `--num-targets 30`
-- 경량 모델만 사용: `--models RF,LR,KNN`
-- 여러 배치로 나누어 처리
-
-### 학습 속도 향상
-
-- 빠른 프리셋 사용: `--preset good_quality_faster_inference`
-- 경량 모델 선택: `--models RF,LR`
-
-## 결과 확인
-
-```mermaid
-graph LR
-    A[학습/평가 완료] --> B[모델 파일]
-    A --> C[평가 결과]
-    A --> D[로그]
-    
-    B --> B1[models/타겟명/]
-    C --> C1[results/]
-    D --> D1[logs/]
-```
-
-- 모델 파일: `models/[타겟명]/` 
-- 평가 결과: `results/` 
-- 로그: `logs/`
-
-## 주의사항
-
-> [!WARNING]
-> AutoGluon은 학습 과정에서 상당한 컴퓨팅 리소스를 사용합니다. 시스템 사양을 확인하세요.
-
-- 대용량 데이터셋 처리 시 충분한 시스템 메모리 필요
-- GPU 메모리 제한 있을 경우 타겟 수 제한 권장
-- AutoGluon은 학습 과정에서 상당한 컴퓨팅 리소스 사용 
->>>>>>> e245cee (complete data train evaluation)
+이 프로젝트는 [MIT 라이선스](LICENSE)에 따라 배포됩니다.
