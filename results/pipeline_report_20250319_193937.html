@@ -1,0 +1,135 @@
+
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>입찰가 전처리 파이프라인 실행 보고서</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                h1, h2 { color: #4a86e8; }
+                .step { background-color: #f5f5f5; padding: 10px; margin: 10px 0; border-left: 5px solid #4a86e8; }
+                .step-complete { border-left-color: #6aa84f; }
+                .step-failed { border-left-color: #e06666; }
+                .metrics { background-color: #ebf5fb; padding: 10px; margin: 10px 0; }
+                table { border-collapse: collapse; width: 100%; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #4a86e8; color: white; }
+                tr:nth-child(even) { background-color: #f2f2f2; }
+            </style>
+        </head>
+        <body>
+            <h1>입찰가 전처리 파이프라인 실행 보고서</h1>
+            <p>실행 시간: 2025-03-19 19:39:10 ~ 2025-03-19 19:39:37</p>
+            <p>총 소요시간: 26.66초</p>
+            
+            <h2>파이프라인 단계</h2>
+        
+            <div class="step step-complete">
+                <h3>단계 1: 데이터 로드</h3>
+                <p>원시 데이터 파일 로드</p>
+                <p>상태: 완료</p>
+                <p>소요시간: 19.75초</p>
+            
+                <div class="metrics">
+                    <h4>단계 지표</h4>
+                    <table>
+                        <tr><th>지표</th><th>값</th></tr>
+                
+                    <tr><td>로드된 데이터셋</td><td>2</td></tr>
+                    
+                    <tr><td>총 레코드 수</td><td>5742418</td></tr>
+                    
+                    </table>
+                </div>
+                
+            </div>
+            
+            <div class="step step-complete">
+                <h3>단계 2: 데이터 정제</h3>
+                <p>결측치 처리, 중복 제거, 데이터 타입 변환</p>
+                <p>상태: 완료</p>
+                <p>소요시간: 6.85초</p>
+            
+                <div class="metrics">
+                    <h4>단계 지표</h4>
+                    <table>
+                        <tr><th>지표</th><th>값</th></tr>
+                
+                    <tr><td>처리된 데이터셋</td><td>2</td></tr>
+                    
+                    <tr><td>제거된 결측치</td><td>0</td></tr>
+                    
+                    <tr><td>제거된 중복</td><td>5728129</td></tr>
+                    
+                    </table>
+                </div>
+                
+            </div>
+            
+            <div class="step step-complete">
+                <h3>단계 3: 데이터 변환</h3>
+                <p>로그 변환, 정규화, 인코딩</p>
+                <p>상태: 완료</p>
+                <p>소요시간: 0.06초</p>
+            
+                <div class="metrics">
+                    <h4>단계 지표</h4>
+                    <table>
+                        <tr><th>지표</th><th>값</th></tr>
+                
+                    <tr><td>처리된 데이터셋</td><td>2</td></tr>
+                    
+                    <tr><td>생성된 특성 수</td><td>2</td></tr>
+                    
+                    </table>
+                </div>
+                
+            </div>
+            
+            <div class="step step-failed">
+                <h3>단계 4: 특성 엔지니어링</h3>
+                <p>텍스트 처리, 차원 축소, 특성 조합</p>
+                <p>상태: 중단됨</p>
+                <p>소요시간: 0.00초</p>
+            
+            </div>
+            
+            <h2>파이프라인 지표 요약</h2>
+            <div class="metrics">
+                <table>
+                    <tr><th>지표</th><th>값</th></tr>
+            
+                <tr><td>로드된 데이터셋</td><td>2</td></tr>
+                
+                <tr><td>총 레코드 수</td><td>5742418</td></tr>
+                
+                <tr><td>처리된 데이터셋</td><td>2</td></tr>
+                
+                <tr><td>제거된 결측치</td><td>0</td></tr>
+                
+                <tr><td>제거된 중복</td><td>5728129</td></tr>
+                
+                <tr><td>생성된 특성 수</td><td>2</td></tr>
+                
+                </table>
+            </div>
+            
+            <h2>추가 정보</h2>
+            <div class="metrics">
+                <table>
+                    <tr><th>항목</th><th>값</th></tr>
+            
+                <tr><td>데이터 디렉토리</td><td>/data/dev/bid-price-analysis-backup/data/processed/</td></tr>
+                
+                <tr><td>파일 패턴</td><td>*.csv</td></tr>
+                
+                <tr><td>MongoDB 업로드</td><td>완료</td></tr>
+                
+                </table>
+            </div>
+            
+            <h2>파이프라인 시각화</h2>
+            <img src="pipeline_visualization_20250319_193937.png" alt="Pipeline Visualization" style="max-width: 100%;">
+            
+        </body>
+        </html>
+        
