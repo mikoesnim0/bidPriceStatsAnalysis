@@ -217,6 +217,15 @@ python-dotenv>=0.19.2
 nltk>=3.6.5
 spacy>=3.2.0
 scikit-learn>=1.0.2
+transformers>=4.34.0   # BGE-M3 모델 지원
+torch>=1.12.0          # PyTorch
+sentence-transformers>=2.2.2  # 고품질 임베딩을 위한 라이브러리
+
+# 차원 축소 및 특성 선택
+scikit-learn>=1.0.2
+umap-learn>=0.5.2
+hdbscan>=0.8.28
+yellowbrick>=1.4    # 특성 시각화
 
 # 시각화
 matplotlib>=3.5.0
@@ -231,10 +240,6 @@ beautifulsoup4>=4.10.0
 tqdm>=4.62.3
 joblib>=1.1.0
 networkx>=2.6.3
-
-# 차원 축소 및 임베딩
-umap-learn>=0.5.2
-hdbscan>=0.8.28
 
 # 테스트
 pytest>=6.2.5
