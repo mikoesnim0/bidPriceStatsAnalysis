@@ -50,7 +50,6 @@ def load_feature_columns(features_path):
     Returns:
         list: List of feature column names.
     """
-    Prepare data for prediction.
     
     try:
         with open(features_path, 'rb') as f:
