@@ -119,7 +119,7 @@ def predict_probabilities(input_data, dataset_key, target_prefix):
     
     return results
 
-def load_and_predict(notice_id, dataset_key="DataSet_3", target_prefix="100"):
+def load_and_predict(notice_id, dataset_key="DataSet_3", target_prefix="100", db_name=None, collection_name=None):
     """
     Load a specific notice from MongoDB and make predictions.
     
@@ -127,6 +127,8 @@ def load_and_predict(notice_id, dataset_key="DataSet_3", target_prefix="100"):
         notice_id (str): The notice ID to predict for.
         dataset_key (str): Dataset key to use for prediction models.
         target_prefix (str): Prefix for target columns.
+        db_name (str, optional): Specific database name to use.
+        collection_name (str, optional): Specific collection name to use.
         
     Returns:
         dict: Predictions and metadata.
@@ -135,17 +137,20 @@ def load_and_predict(notice_id, dataset_key="DataSet_3", target_prefix="100"):
     
     # Connect to MongoDB and load the data
     with MongoDBHandler() as mongo_handler:
-        collection_names = mongo_handler.get_default_collection_names()
-        
-        # Get the appropriate collection based on dataset_key
-        collection = mongo_handler.db[collection_names[dataset_key]]
+        if db_name and collection_name:
+            # Use specified database and collection
+            collection = mongo_handler.client[db_name][collection_name]
+        else:
+            # Use default collection based on dataset_key
+            collection_names = mongo_handler.get_default_collection_names()
+            collection = mongo_handler.db[collection_names[dataset_key]]
         
         # Find the notice
         notice_data = collection.find_one({"공고번호": notice_id}, {"_id": 0})
         
         if not notice_data:
-            logger.error(f"❌ Notice with ID {notice_id} not found in {dataset_key}")
-            raise ValueError(f"❌ Notice with ID {notice_id} not found in {dataset_key}")
+            logger.error(f"❌ Notice with ID {notice_id} not found in {collection.name}")
+            raise ValueError(f"❌ Notice with ID {notice_id} not found in {collection.name}")
     
     # Convert to DataFrame (single row)
     input_df = pd.DataFrame([notice_data])
@@ -158,7 +163,9 @@ def load_and_predict(notice_id, dataset_key="DataSet_3", target_prefix="100"):
         "notice_id": notice_id,
         "dataset_key": dataset_key,
         "target_prefix": target_prefix,
-        "predictions": predictions.to_dict(orient="records")[0],
+        "db_name": db_name or mongo_handler.db.name,
+        "collection_name": collection_name or collection.name,
+        "predictions": predictions.to_xdict(orient="records")[0],
         "metadata": {k: v for k, v in notice_data.items() if k != "공고번호"}
     }
     
@@ -195,7 +202,29 @@ def save_prediction(prediction, output_dir="results"):
     
     return filepath
 
-def batch_predict(notice_ids, dataset_key="DataSet_3", target_prefix="100"):
+def get_all_notice_ids(db_name=None, collection_name=None):
+    """
+    Get all notice IDs from the specified database and collection.
+    
+    Parameters:
+        db_name (str, optional): Database name to use.
+        collection_name (str, optional): Collection name to use.
+        
+    Returns:
+        list: List of notice IDs.
+    """
+    with MongoDBHandler() as mongo_handler:
+        if db_name and collection_name:
+            collection = mongo_handler.client[db_name][collection_name]
+        else:
+            collection_names = mongo_handler.get_default_collection_names()
+            collection = mongo_handler.db[collection_names["DataSet_3"]]
+        
+        notice_ids = collection.distinct("공고번호")
+        logger.info(f"Found {len(notice_ids)} notice IDs in {collection.name}")
+        return notice_ids
+
+def batch_predict(notice_ids, dataset_key="DataSet_3", target_prefix="100", db_name=None, collection_name=None):
     """
     Make predictions for multiple notices.
     
@@ -203,17 +232,20 @@ def batch_predict(notice_ids, dataset_key="DataSet_3", target_prefix="100"):
         notice_ids (list): List of notice IDs to predict for.
         dataset_key (str): Dataset key to use for prediction models.
         target_prefix (str): Prefix for target columns.
+        db_name (str, optional): Specific database name to use.
+        collection_name (str, optional): Specific collection name to use.
         
     Returns:
         list: List of prediction results.
     """
     logger.info(f"Batch predicting for {len(notice_ids)} notices")
+    logger.info(f"Using database: {db_name or 'default'}, collection: {collection_name or 'default'}")
     
     results = []
     
     for notice_id in notice_ids:
         try:
-            prediction = load_and_predict(notice_id, dataset_key, target_prefix)
+            prediction = load_and_predict(notice_id, dataset_key, target_prefix, db_name, collection_name)
             save_prediction(prediction)
             results.append(prediction)
         except Exception as e:
@@ -231,18 +263,25 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default="DataSet_3", help="Dataset key to use")
     parser.add_argument("--target_prefix", type=str, default="100", help="Target prefix to use")
     parser.add_argument("--batch_file", type=str, help="Path to file containing notice IDs for batch prediction")
+    parser.add_argument("--db_name", type=str, help="Specific database name to use")
+    parser.add_argument("--collection_name", type=str, help="Specific collection name to use")
+    parser.add_argument("--all_notices", action="store_true", help="Predict for all notices in the database")
     
     args = parser.parse_args()
     
     try:
-        if args.batch_file:
+        if args.all_notices:
+            notice_ids = get_all_notice_ids(args.db_name, args.collection_name)
+            batch_predict(notice_ids, args.dataset, args.target_prefix, args.db_name, args.collection_name)
+        
+        elif args.batch_file:
             with open(args.batch_file, 'r') as f:
                 notice_ids = [line.strip() for line in f if line.strip()]
             
-            batch_predict(notice_ids, args.dataset, args.target_prefix)
+            batch_predict(notice_ids, args.dataset, args.target_prefix, args.db_name, args.collection_name)
         
         elif args.notice_id:
-            prediction = load_and_predict(args.notice_id, args.dataset, args.target_prefix)
+            prediction = load_and_predict(args.notice_id, args.dataset, args.target_prefix, args.db_name, args.collection_name)
             saved_path = save_prediction(prediction)
             print(f"Prediction saved to {saved_path}")
         
