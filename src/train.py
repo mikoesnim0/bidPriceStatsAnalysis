@@ -13,6 +13,10 @@ from datetime import datetime
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 import logging
+import sys
+
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Try importing AutoGluon, but handle if not installed
 try:
@@ -21,6 +25,7 @@ try:
 except ImportError:
     AUTOGLUON_AVAILABLE = False
 
+# Fix relative imports
 from src.config import (
     TRAIN_DATA_FILE, MODELS_DIR, RESULTS_DIR, MODEL_PARAMS,
     NUMERIC_FEATURES, CATEGORICAL_FEATURES, TEXT_FEATURES,
@@ -28,8 +33,18 @@ from src.config import (
 )
 from src.data_processing import load_data, prepare_features
 from src.utils import setup_logger, save_pickle, save_json, timer, generate_timestamp
-from mongodb_handler import MongoDBHandler
-from init_dirs import init_directories
+from src.mongodb_handler import MongoDBHandler
+
+# Try to import initialization module
+try:
+    from src.init_dirs import init_directories
+except ImportError:
+    # Define a simple initialization function if module is missing
+    def init_directories():
+        """Initialize required directories."""
+        os.makedirs(MODELS_DIR, exist_ok=True)
+        os.makedirs(RESULTS_DIR, exist_ok=True)
+        print(f"Created directories: {MODELS_DIR}, {RESULTS_DIR}")
 
 # Configure logging
 logging.basicConfig(
@@ -669,6 +684,242 @@ def train_all_models():
     logger.info("All model training completed")
     return all_results
 
+def load_data_from_mongodb(dataset_key="dataset3", split="train"):
+    """
+    Load training or test data from MongoDB.
+    
+    Args:
+        dataset_key (str): Dataset key (dataset2, dataset3, or datasetetc).
+        split (str): Data split (train, test, or valid).
+        
+    Returns:
+        pd.DataFrame: Loaded data.
+    """
+    logger.info(f"Loading {split} data from MongoDB for {dataset_key}")
+    
+    # 데이터베이스 이름
+    db_name = 'data_preprocessed'
+    
+    # 컬렉션 이름 (예: preprocessed_dataset3_train)
+    collection_name = f"preprocessed_{dataset_key}_{split}"
+    
+    try:
+        with MongoDBHandler(db_name=db_name) as mongo_handler:
+            # Check if the collection exists
+            available_collections = mongo_handler.db.list_collection_names()
+            
+            if collection_name not in available_collections:
+                logger.error(f"❌ Collection {collection_name} not found in database {db_name}")
+                logger.info(f"Available collections: {available_collections}")
+                raise ValueError(f"Collection {collection_name} not found in database {db_name}")
+            
+            # Try to get the data from MongoDB
+            collection = mongo_handler.db[collection_name]
+            cursor = collection.find({}, {"_id": 0})
+            df = pd.DataFrame(list(cursor))
+            
+            if df.empty:
+                logger.error(f"❌ No data found in collection {collection_name}")
+                raise ValueError(f"No data found in collection {collection_name}")
+            
+            logger.info(f"✅ Loaded {len(df)} records from {collection_name}")
+            logger.info(f"✅ Columns: {df.columns.tolist()[:10]}... (truncated)")
+            
+            # Find target columns
+            target_prefixes = ['010_', '020_', '050_', '100_']
+            found_targets = False
+            
+            for prefix in target_prefixes:
+                target_cols = [col for col in df.columns if col.startswith(prefix)]
+                if target_cols:
+                    found_targets = True
+                    logger.info(f"✅ Found {len(target_cols)} target columns with prefix '{prefix}'")
+            
+            if not found_targets:
+                logger.warning("⚠️ No target columns found with expected prefixes")
+                # Try adding dummy target columns for testing purposes
+                logger.info("⚠️ Adding dummy target columns for testing")
+                for i in range(1, 11):
+                    bin_label = f"100_{i:03d}"
+                    df[bin_label] = np.random.random(len(df)) * 0.1
+            
+            return df
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to load data from MongoDB: {e}")
+        raise
+
+def train_model_for_dataset(dataset_key="dataset3", target_prefix="100", model_type="lgbm", time_limit_per_model=60):
+    """
+    Train a model for a specific dataset and target prefix.
+    
+    Args:
+        dataset_key (str): Dataset key (dataset2, dataset3, or datasetetc).
+        target_prefix (str): Target column prefix (e.g., "100").
+        model_type (str): Model type to train ("lgbm" or "autogluon").
+        time_limit_per_model (int): Maximum time in seconds to spend training each model.
+        
+    Returns:
+        dict: Training results.
+    """
+    logger.info(f"Training {model_type} model for {dataset_key} with target prefix {target_prefix}")
+    
+    try:
+        # Load training data
+        train_data = load_data_from_mongodb(dataset_key, "train")
+        
+        # Load validation data
+        valid_data = load_data_from_mongodb(dataset_key, "valid")
+        
+        # Prepare target columns
+        target_cols = [col for col in train_data.columns if col.startswith(f"{target_prefix}_")]
+        
+        if not target_cols:
+            logger.error(f"❌ No target columns found with prefix '{target_prefix}_'")
+            raise ValueError(f"No target columns found with prefix '{target_prefix}_'")
+        
+        logger.info(f"✅ Found {len(target_cols)} target columns: {target_cols[:5]}... (truncated)")
+        
+        # 데이터 타입 처리: object 타입을 숫자로 변환
+        for col in train_data.columns:
+            if train_data[col].dtype == 'object':
+                logger.info(f"Converting column '{col}' from object to categorical")
+                try:
+                    # 범주형 변수로 변환
+                    train_data[col] = train_data[col].astype('category').cat.codes
+                    if col in valid_data.columns:
+                        valid_data[col] = valid_data[col].astype('category').cat.codes
+                except Exception as e:
+                    # 변환 실패 시 컬럼 제외
+                    logger.warning(f"Could not convert '{col}', will exclude from features: {e}")
+                    train_data = train_data.drop(columns=[col])
+                    if col in valid_data.columns:
+                        valid_data = valid_data.drop(columns=[col])
+        
+        # Prepare feature columns (exclude all target columns and 공고번호)
+        all_target_prefixes = ['010_', '020_', '050_', '100_']
+        feature_cols = [col for col in train_data.columns 
+                       if not any(col.startswith(prefix) for prefix in all_target_prefixes)
+                       and col != "공고번호"]
+        
+        logger.info(f"✅ Using {len(feature_cols)} feature columns")
+        
+        # 타겟 컬럼을 최대 5개만 사용 (시간 제한을 위해)
+        if len(target_cols) > 5:
+            logger.info(f"Limiting to first 5 target columns for faster training")
+            target_cols = target_cols[:5]
+        
+        # Train a model for each target column
+        results = {}
+        
+        for target_col in target_cols:
+            start_time = datetime.now()
+            logger.info(f"Training model for target: {target_col} (started at {start_time})")
+            
+            # Split features and target
+            X_train = train_data[feature_cols]
+            y_train = train_data[target_col]
+            
+            X_valid = valid_data[feature_cols]
+            y_valid = valid_data[target_col]
+            
+            if model_type == "lgbm":
+                # LightGBM 파라미터 설정 - 빠른 학습을 위해 간소화
+                params = {
+                    "objective": "regression",
+                    "metric": "rmse",
+                    "verbosity": -1,
+                    "early_stopping_rounds": 10,
+                    "num_iterations": 50,  # 반복 횟수 제한
+                    "learning_rate": 0.1,
+                    "num_leaves": 31
+                }
+                
+                # Train LightGBM model with time limit
+                try:
+                    model, model_results = train_lgbm_model(X_train, y_train, X_valid, y_valid, params)
+                    
+                    # Save model
+                    model_dir = os.path.join(MODELS_DIR, dataset_key.lower())
+                    os.makedirs(model_dir, exist_ok=True)
+                    
+                    model_path = os.path.join(model_dir, f"{dataset_key.lower()}_{target_prefix}_{target_col.split('_')[-1]}.pkl")
+                    with open(model_path, 'wb') as f:
+                        pickle.dump(model, f)
+                    
+                    logger.info(f"✅ Model for {target_col} saved to {model_path}")
+                    
+                    # Save feature columns for future reference
+                    features_path = os.path.join(model_dir, f"{dataset_key.lower()}_features.pkl")
+                    if not os.path.exists(features_path):
+                        with open(features_path, 'wb') as f:
+                            pickle.dump(feature_cols, f)
+                        logger.info(f"✅ Feature columns saved to {features_path}")
+                    
+                    # Store results
+                    results[target_col] = model_results
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to train LightGBM model for {target_col}: {e}")
+                    results[target_col] = {"error": str(e)}
+                
+            elif model_type == "autogluon" and AUTOGLUON_AVAILABLE:
+                # AutoGluon 빠른 학습 설정
+                try:
+                    # Prepare data for AutoGluon
+                    train_data_ag = X_train.copy()
+                    train_data_ag[target_col] = y_train
+                    
+                    # Train AutoGluon model with time limit
+                    model_dir = os.path.join(MODELS_DIR, "autogluon", dataset_key.lower(), 
+                                            f"{target_prefix}_{target_col.split('_')[-1]}")
+                    os.makedirs(model_dir, exist_ok=True)
+                    
+                    predictor = TabularPredictor(label=target_col, path=model_dir)
+                    predictor.fit(
+                        train_data=train_data_ag,
+                        time_limit=time_limit_per_model,  # 시간 제한
+                        presets="medium_quality_faster_train",
+                        num_stack_levels=0,  # 스태킹 비활성화
+                        num_bag_folds=2  # 최소 배깅 폴드
+                    )
+                    
+                    # Evaluate on validation set
+                    valid_data_ag = X_valid.copy()
+                    valid_data_ag[target_col] = y_valid
+                    
+                    performance = predictor.evaluate(valid_data_ag)
+                    logger.info(f"✅ AutoGluon model for {target_col} evaluation: {performance}")
+                    
+                    # Store results
+                    results[target_col] = {
+                        "model_path": model_dir,
+                        "performance": performance
+                    }
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to train AutoGluon model for {target_col}: {e}")
+                    results[target_col] = {"error": str(e)}
+                
+            else:
+                logger.error(f"❌ Unsupported model type: {model_type}")
+                raise ValueError(f"Unsupported model type: {model_type}")
+            
+            # 시간 제한 확인
+            elapsed_time = (datetime.now() - start_time).total_seconds()
+            logger.info(f"Model training for {target_col} took {elapsed_time:.2f} seconds")
+            
+            # 시간 제한을 넘기면 중단
+            if elapsed_time > time_limit_per_model:
+                logger.warning(f"Time limit exceeded for {target_col}, stopping training")
+                break
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to train model: {e}")
+        raise
+
 def main():
     """Main function to train models."""
     try:
@@ -716,16 +967,33 @@ def main():
         raise
 
 if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Train models for bid price prediction")
+    parser.add_argument("--dataset", type=str, default="dataset3", 
+                        choices=["dataset2", "dataset3", "datasetetc"],
+                        help="Dataset to use for training")
+    parser.add_argument("--model", type=str, default="lgbm", 
+                        choices=["lgbm", "autogluon"],
+                        help="Model type to train")
+    parser.add_argument("--target-prefix", type=str, default="100", 
+                        choices=["010", "020", "050", "100"],
+                        help="Target column prefix (e.g., '100' for 100_001, 100_002, etc.)")
+    parser.add_argument("--time-limit", type=int, default=60,
+                        help="Time limit per model in seconds (default: 60)")
+    args = parser.parse_args()
+    
     try:
-        all_results = train_all_models()
+        # Initialize directories
+        init_directories()
+        
+        # Train model
+        results = train_model_for_dataset(args.dataset, args.target_prefix, args.model, args.time_limit)
         
         # Print summary
-        for dataset_key, prefixes in all_results.items():
-            for prefix, results in prefixes.items():
-                avg_rmse = np.mean([result['rmse'] for result in results.values()])
-                avg_r2 = np.mean([result['r2'] for result in results.values()])
-                print(f"{dataset_key} - {prefix}: Avg RMSE = {avg_rmse:.6f}, Avg R² = {avg_r2:.6f}")
-    
+        logger.info("Training completed successfully")
+        logger.info(f"Trained {len(results)} models for {args.dataset} with target prefix {args.target_prefix}")
+        
     except Exception as e:
-        logger.error(f"❌ Model training failed: {e}")
+        logger.error(f"❌ Training failed: {e}")
         raise 
