@@ -137,6 +137,7 @@
     "kiwisolver": "1.4.8",
     "appdirs": "1.4.4",
     "joblib": "1.4.2",
+    "argparse": "1.4.0",
     "mako": "1.3.9",
     "aiosignal": "1.3.2",
     "contourpy": "1.3.1",

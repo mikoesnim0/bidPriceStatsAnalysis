@@ -870,9 +870,13 @@ def train_model_for_dataset(dataset_key="dataset3", target_prefix="100", model_t
                     train_data_ag = X_train.copy()
                     train_data_ag[target_col] = y_train
                     
+                    # 모델 번호 추출
+                    model_number = target_col.split('_')[-1]
+                    
                     # Train AutoGluon model with time limit
+                    # 수정된 경로: models/autogluon/dataset/010/010_001/ 형태로 저장
                     model_dir = os.path.join(MODELS_DIR, "autogluon", dataset_key.lower(), 
-                                            f"{target_prefix}_{target_col.split('_')[-1]}")
+                                           target_prefix, f"{target_prefix}_{model_number}")
                     os.makedirs(model_dir, exist_ok=True)
                     
                     predictor = TabularPredictor(label=target_col, path=model_dir)
