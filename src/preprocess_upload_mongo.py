@@ -106,8 +106,8 @@ def main():
                     df (DataFrame): 전처리할 데이터프레임
                     name (str): 데이터셋 이름
                     config (dict): 전처리 설정
-                    
-                Returns:
+    
+    Returns:
                     DataFrame: 전처리된 데이터프레임
                 """
                 # BGE-M3 임베딩 모델 사용이 활성화된 경우
@@ -404,8 +404,8 @@ def main():
                         print("   ✅ 특성 선택 알고리즘이 적용되었습니다.")
             else:
                 print("\n❌ 처리할 데이터가 없습니다. 데이터 디렉토리와 파일 패턴을 확인하세요.")
-                
-        except Exception as e:
+            
+    except Exception as e:
             logger.error(f"파이프라인 실행 중 오류 발생: {e}", exc_info=True)
             print(f"\n❌ 오류 발생: {e}")
     

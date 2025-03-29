@@ -10,7 +10,9 @@ import json
 from typing import Dict, Any, Optional, List
 
 # Import our modules
-from mongodb_handler import MongoDBHandler
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from src.mongodb_handler import MongoDBHandler
 
 # Configure logging
 logging.basicConfig(

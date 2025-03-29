@@ -202,116 +202,103 @@ def load_processed_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.
     """
     Load preprocessed training and testing data.
     
-    If preprocessed data files don't exist, attempt to load from DR_Modified_3_output.csv 
-    and perform preprocessing.
-    
     Returns:
-        X_train, X_test, y_train, y_test DataFrames
+        train_X, test_X, train_Y, test_Y DataFrames
     """
     logger.info("Loading preprocessed data")
     
-    # Default processed data path
-    dr_modified_path = os.path.join(DATA_DIR, "DR_Modified_3_output.csv")
-    
     try:
-        # Try to load train and test data
-        if os.path.exists(TRAIN_DATA_FILE) and os.path.exists(TEST_DATA_FILE):
-            logger.info(f"Loading train data from {TRAIN_DATA_FILE}")
-            train_data = pd.read_csv(TRAIN_DATA_FILE)
-            
-            logger.info(f"Loading test data from {TEST_DATA_FILE}")
-            test_data = pd.read_csv(TEST_DATA_FILE)
-            
-            # Extract features and targets
-            if TARGET_COLUMN in train_data.columns and TARGET_COLUMN in test_data.columns:
-                X_train = train_data.drop(columns=[TARGET_COLUMN])
-                y_train = train_data[TARGET_COLUMN]
-                
-                X_test = test_data.drop(columns=[TARGET_COLUMN])
-                y_test = test_data[TARGET_COLUMN]
-                
-                logger.info(f"Successfully loaded preprocessed data. "
-                           f"Train shape: {X_train.shape}, Test shape: {X_test.shape}")
-                
-                return X_train, X_test, y_train, y_test
-            else:
-                logger.warning(f"Target column '{TARGET_COLUMN}' not found in data files")
+        # 필요한 파일 경로
+        train_file = os.path.join(DATA_DIR, "train_data.csv")
+        test_file = os.path.join(DATA_DIR, "test_data.csv")
+        train_targets_file = os.path.join(DATA_DIR, "train_targets.csv")
+        test_targets_file = os.path.join(DATA_DIR, "test_targets.csv")
         
-        # If train/test files don't exist or are invalid, try loading DR_Modified_3_output.csv
-        if os.path.exists(dr_modified_path):
-            logger.info(f"Train/test split files not found or invalid. Loading from {dr_modified_path}")
-            data = pd.read_csv(dr_modified_path)
-            
-            # Check if this is already preprocessed data
-            logger.info(f"Loaded data with shape {data.shape}")
-            
-            # Split into features and target(s)
-            # Assuming all columns that start with numeric values (e.g., 020_001) are targets
-            target_columns = [col for col in data.columns if any(c.isdigit() for c in col[:3])]
-            
-            if not target_columns:
-                # If no target columns found, assume the default target column
-                if TARGET_COLUMN in data.columns:
-                    target_columns = [TARGET_COLUMN]
-                else:
-                    raise ValueError(f"No target columns found in {dr_modified_path}")
-            
-            logger.info(f"Identified {len(target_columns)} target columns: {target_columns[:5]}...")
-            
-            # *** 중요: NaN 값이 있는 행 제거 ***
-            # AutoGluon은 타겟 변수에 NaN 값이 있으면 학습 실패함
-            original_size = len(data)
-            
-            # 모든 타겟 컬럼에 대해 NaN이 있는 행 확인
-            nan_rows = data[target_columns].isna().any(axis=1)
-            nan_count = nan_rows.sum()
-            
-            if nan_count > 0:
-                logger.warning(f"Found {nan_count} rows with NaN values in target columns. Removing these rows.")
-                # NaN 값이 있는 행 제거
-                data = data[~nan_rows]
-                logger.info(f"Data shape after removing NaN rows: {data.shape} (removed {original_size - len(data)} rows)")
-            
-            # 처리 후 NaN 확인
-            remaining_nans = data[target_columns].isna().any().sum()
-            if remaining_nans > 0:
-                logger.error(f"There are still {remaining_nans} target columns with NaN values after processing")
-                raise ValueError("Failed to remove all NaN values from target columns")
-            else:
-                logger.info("All rows with NaN values in target columns have been successfully removed")
-            
-            # Create a single target DataFrame with all target columns
-            y_data = data[target_columns]
-            X_data = data.drop(columns=target_columns)
-            
-            # Split into train and test
-            X_train, X_test, y_train, y_test = train_test_split(
-                X_data, y_data, test_size=TEST_SIZE, random_state=RANDOM_SEED
-            )
-            
-            logger.info(f"Split data into train and test sets. "
-                       f"Train shape: {X_train.shape}, Test shape: {X_test.shape}")
-            
-            # Save the split data for future use
-            try:
-                train_data = pd.concat([X_train, y_train], axis=1)
-                test_data = pd.concat([X_test, y_test], axis=1)
-                
-                save_data(train_data, TRAIN_DATA_FILE)
-                save_data(test_data, TEST_DATA_FILE)
-                
-                logger.info(f"Saved train and test data for future use")
-            except Exception as e:
-                logger.warning(f"Could not save train/test data: {str(e)}")
-            
-            return X_train, X_test, y_train, y_test
+        # 파일 존재 확인
+        required_files = [train_file, test_file, train_targets_file, test_targets_file]
+        missing_files = [f for f in required_files if not os.path.exists(f)]
         
-        # If all else fails, raise an error
-        raise FileNotFoundError(f"No preprocessed data files found. Please run data processing first.")
+        if missing_files:
+            logger.warning(f"Missing preprocessed data files: {missing_files}")
+            raise FileNotFoundError(f"Missing preprocessed data files: {missing_files}")
+        
+        # 데이터 로드
+        logger.info(f"Loading train features from {train_file}")
+        train_X = pd.read_csv(train_file)
+        
+        logger.info(f"Loading test features from {test_file}")
+        test_X = pd.read_csv(test_file)
+        
+        logger.info(f"Loading train targets from {train_targets_file}")
+        train_Y = pd.read_csv(train_targets_file)
+        
+        logger.info(f"Loading test targets from {test_targets_file}")
+        test_Y = pd.read_csv(test_targets_file)
+        
+        # 데이터셋 형태 확인
+        logger.info(f"Train features shape: {train_X.shape}")
+        logger.info(f"Test features shape: {test_X.shape}")
+        logger.info(f"Train targets shape: {train_Y.shape}")
+        logger.info(f"Test targets shape: {test_Y.shape}")
+        
+        # 타겟 컬럼 확인
+        logger.info(f"Target columns: {train_Y.columns.tolist()}")
+        
+        return train_X, test_X, train_Y, test_Y
     
     except Exception as e:
         logger.error(f"Error loading preprocessed data: {str(e)}")
         raise
+
+def split_and_save_data(X: pd.DataFrame, Y: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Split the data into training and testing sets and save them to disk.
+    
+    Args:
+        X: Features DataFrame
+        Y: Targets DataFrame
+        
+    Returns:
+        train_X, test_X, train_Y, test_Y - Split DataFrames
+    """
+    logger.info("Splitting and saving data")
+    
+    # 학습/테스트 분할 (stratify 사용 안 함 - 여러 타겟 컬럼이 있을 수 있음)
+    train_X, test_X, train_Y, test_Y = train_test_split(
+        X, Y, test_size=TEST_SIZE, random_state=RANDOM_SEED
+    )
+    
+    logger.info(f"Train features shape: {train_X.shape}")
+    logger.info(f"Test features shape: {test_X.shape}")
+    logger.info(f"Train targets shape: {train_Y.shape}")
+    logger.info(f"Test targets shape: {test_Y.shape}")
+    
+    # 디렉토리 생성
+    os.makedirs(DATA_DIR, exist_ok=True)
+    
+    # 파일 저장
+    train_file = os.path.join(DATA_DIR, "train_data.csv")
+    test_file = os.path.join(DATA_DIR, "test_data.csv")
+    train_targets_file = os.path.join(DATA_DIR, "train_targets.csv")
+    test_targets_file = os.path.join(DATA_DIR, "test_targets.csv")
+    
+    # 특성 데이터 저장
+    logger.info(f"Saving train features to {train_file}")
+    train_X.to_csv(train_file, index=False)
+    
+    logger.info(f"Saving test features to {test_file}")
+    test_X.to_csv(test_file, index=False)
+    
+    # 타겟 데이터 저장
+    logger.info(f"Saving train targets to {train_targets_file}")
+    train_Y.to_csv(train_targets_file, index=False)
+    
+    logger.info(f"Saving test targets to {test_targets_file}")
+    test_Y.to_csv(test_targets_file, index=False)
+    
+    logger.info("Data successfully split and saved")
+    
+    return train_X, test_X, train_Y, test_Y
 
 def main():
     """Main function to demonstrate data processing pipeline."""

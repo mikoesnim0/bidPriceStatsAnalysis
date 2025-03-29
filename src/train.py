@@ -14,6 +14,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 import logging
 import sys
+import time
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -365,97 +366,160 @@ def train_single_target_model(
     X_train: pd.DataFrame,
     Y_train: pd.DataFrame,
     target_col: str,
+    dataset_key: str = "dataset2",
     use_gpu: bool = True,
     selected_models: Optional[List[str]] = None,
     preset: str = "medium_quality_faster_train"
 ) -> str:
     """
-    Train a model for a single target column using AutoGluon.
+    특정 타겟 컬럼에 대한 모델을 학습합니다.
     
     Args:
-        X_train: Training features DataFrame
-        Y_train: Training targets DataFrame
-        target_col: Target column name to train for
-        use_gpu: Whether to use GPU for training
-        selected_models: List of specific models to use, or None for all
-        preset: AutoGluon quality preset
-    
+        X_train: 학습 특성 DataFrame
+        Y_train: 학습 타겟 DataFrame 
+        target_col: 타겟 컬럼명 (예: "010_001")
+        dataset_key: 데이터셋 키 (예: "dataset2")
+        use_gpu: GPU 사용 여부
+        selected_models: 사용할 모델 목록 
+        preset: AutoGluon 프리셋
+        
     Returns:
-        Path to the saved model
+        학습된 모델 저장 경로
     """
+    if not AUTOGLUON_AVAILABLE:
+        error_msg = "AutoGluon is not installed. Install with: pip install autogluon.tabular"
+        logger.error(error_msg)
+        raise ImportError(error_msg)
+    
     logger.info(f"Training model for target: {target_col}")
     
-    # Extract the specific target column from Y_train
-    if target_col in Y_train.columns:
-        y_train = Y_train[target_col]
-    else:
-        raise ValueError(f"Target column '{target_col}' not found in training data")
+    # 타겟 컬럼에서 프리픽스와 bin ID 추출
+    # 예: "010_001" -> prefix="010", bin_id="001"
+    parts = target_col.split("_")
+    if len(parts) != 2:
+        raise ValueError(f"타겟 컬럼명 형식이 잘못되었습니다: {target_col}. 'PREFIX_BIN' 형식이어야 합니다.")
     
-    # Combine features and target into one DataFrame for AutoGluon
+    target_prefix, bin_id = parts
+    
+    # 모델 디렉토리 생성
+    from src.config import get_model_path
+    model_dir = get_model_path(dataset_key, target_prefix, bin_id)
+    os.makedirs(model_dir, exist_ok=True)
+    
+    # 학습 데이터 준비
+    logger.info(f"Preparing training data for {target_col}")
     train_data = X_train.copy()
-    train_data[target_col] = y_train
     
-    # Set up AutoGluon parameters
-    params = MODEL_PARAMS["autogluon"].copy()
+    # 대상 타겟 컬럼이 Y_train에 있는지 확인
+    if target_col not in Y_train.columns:
+        logger.error(f"Target column {target_col} not found in training data")
+        raise ValueError(f"Target column {target_col} not found in training data. Available columns: {Y_train.columns.tolist()}")
     
-    # Update parameters based on function arguments
-    params["presets"] = preset
+    # 타겟 컬럼 추가
+    train_data[target_col] = Y_train[target_col]
     
-    # Set up model output directory
-    model_path = os.path.join(MODELS_DIR, target_col)
-    os.makedirs(model_path, exist_ok=True)
-    
-    # Configure AutoGluon parameters
-    ag_params = {
-        "path": model_path,
-        "label": target_col,
-        "problem_type": "regression"
+    # Autogluon 설정
+    params = {
+        "time_limit": MODEL_PARAMS["autogluon"]["time_limit"],
+        "presets": preset,
+        "num_stack_levels": MODEL_PARAMS["autogluon"]["num_stack_levels"],
+        "num_bag_folds": MODEL_PARAMS["autogluon"]["num_bag_folds"],
+        "eval_metric": MODEL_PARAMS["autogluon"]["eval_metric"]
     }
     
-    # Add GPU setting
-    ag_args = {
-        "num_gpus": 1 if use_gpu else 0
-    }
+    # GPU 사용 설정
+    if use_gpu:
+        logger.info("Using GPU for training")
+        params["num_gpus"] = 1
     
-    # Add model selection if provided
+    # 선택된 모델 설정
     if selected_models:
-        ag_args["excluded_model_types"] = None  # Reset exclusions
-        ag_args["included_model_types"] = selected_models
+        logger.info(f"Using selected models: {selected_models}")
+        excluded_models = None
+        included_models = selected_models
+    else:
+        excluded_models = None
+        included_models = None
     
-    # Train the model
+    # AutoGluon 모델 학습
     try:
-        predictor = TabularPredictor(**ag_params)
+        logger.info(f"Training model at: {model_dir}")
         
+        # TabularPredictor 생성 및 학습
+        predictor = TabularPredictor(
+            label=target_col,
+            path=str(model_dir),
+            problem_type="regression"
+        )
+        
+        # 훈련 시작 시간 기록
+        start_time = timer()
+        
+        # 모델 학습
         predictor.fit(
             train_data=train_data,
             time_limit=params["time_limit"],
             presets=params["presets"],
             num_stack_levels=params["num_stack_levels"],
             num_bag_folds=params["num_bag_folds"],
-            **ag_args
+            num_gpus=params.get("num_gpus", 0),
+            excluded_model_types=excluded_models,
+            included_model_types=included_models
         )
         
-        # Save model info
-        model_info = {
-            "target_column": target_col,
-            "training_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "preset": preset,
-            "use_gpu": use_gpu,
-            "selected_models": selected_models,
-            "feature_count": X_train.shape[1],
-            "sample_count": X_train.shape[0]
-        }
+        # 학습 결과
+        training_time = timer(start_time)
         
-        # Save model info as JSON
-        with open(os.path.join(model_path, "model_info.json"), "w") as f:
-            json.dump(model_info, f, indent=4)
+        # 학습 결과 저장
+        try:
+            leaderboard = predictor.leaderboard()
+            best_model = leaderboard.iloc[0]["model"] if not leaderboard.empty else None
+            best_score = leaderboard.iloc[0]["score_val"] if not leaderboard.empty else None
+            
+            training_results = {
+                "model_path": str(model_dir),
+                "training_time": training_time,
+                "target_column": target_col,
+                "dataset_key": dataset_key,
+                "target_prefix": target_prefix,
+                "bin_id": bin_id,
+                "training_date": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "feature_count": X_train.shape[1],
+                "sample_count": X_train.shape[0],
+                "best_model": best_model,
+                "best_score": float(best_score) if best_score is not None else None,
+                "features": X_train.columns.tolist()
+            }
+        except Exception as e:
+            logger.warning(f"Error getting leaderboard results: {e}")
+            training_results = {
+                "model_path": str(model_dir),
+                "training_time": training_time,
+                "target_column": target_col,
+                "dataset_key": dataset_key,
+                "target_prefix": target_prefix,
+                "bin_id": bin_id,
+                "training_date": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "feature_count": X_train.shape[1],
+                "sample_count": X_train.shape[0],
+                "error": str(e)
+            }
         
-        logger.info(f"Model for {target_col} trained and saved to {model_path}")
+        # 결과 JSON으로 저장
+        results_path = os.path.join(model_dir, "training_results.json")
+        with open(results_path, 'w') as f:
+            json.dump(training_results, f, indent=4)
         
-        return model_path
+        logger.info(f"✅ 모델 학습 완료: {model_dir}")
+        logger.info(f"⏱️ 학습 시간: {training_time:.2f}초")
+        
+        if 'best_model' in training_results and training_results['best_model']:
+            logger.info(f"🏆 최고 모델: {training_results['best_model']}, 검증 점수: {training_results.get('best_score', 'N/A')}")
+        
+        return str(model_dir)
         
     except Exception as e:
-        logger.error(f"Error training model for {target_col}: {str(e)}")
+        logger.error(f"❌ 모델 학습 중 오류 발생: {str(e)}")
         raise
 
 def prepare_train_test_data(df, target_prefix, test_size=0.2, random_state=42):
