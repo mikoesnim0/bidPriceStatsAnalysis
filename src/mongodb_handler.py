@@ -260,16 +260,38 @@ class MongoDBHandler:
     
     def get_default_collection_names(self):
         """
-        Get default collection names.
+        데이터셋 키에 따른 기본 컬렉션 이름 매핑을 반환합니다.
         
         Returns:
             dict: Default collection names.
         """
-        return {
-            "DataSet_3": f"{self.collection_prefix}_3",
-            "DataSet_2": f"{self.collection_prefix}_2",
-            "DataSet_etc": f"{self.collection_prefix}_etc"
-        }
+        # 데이터베이스 이름에 따라 형식 변경
+        if self.db_name and 'data_preprocessed' in self.db_name.lower():
+            # data_preprocessed 데이터베이스에서 사용하는 컬렉션 이름 형식
+            return {
+                "dataset2": "preprocessed_dataset2_train",
+                "dataset3": "preprocessed_dataset3_train", 
+                "datasetetc": "preprocessed_datasetetc_train",
+                "DataSet_2": "preprocessed_dataset2_train",
+                "DataSet_3": "preprocessed_dataset3_train",
+                "DataSet_etc": "preprocessed_datasetetc_train",
+                "2": "preprocessed_dataset2_train",
+                "3": "preprocessed_dataset3_train",
+                "etc": "preprocessed_datasetetc_train"
+            }
+        else:
+            # 기존 gfcon 데이터베이스에서 사용하는 컬렉션 이름 형식
+            return {
+                "DataSet_3": f"{self.collection_prefix}_3",
+                "DataSet_2": f"{self.collection_prefix}_2",
+                "DataSet_etc": f"{self.collection_prefix}_etc",
+                "dataset3": f"{self.collection_prefix}_3",
+                "dataset2": f"{self.collection_prefix}_2",
+                "datasetetc": f"{self.collection_prefix}_etc",
+                "3": f"{self.collection_prefix}_3",
+                "2": f"{self.collection_prefix}_2",
+                "etc": f"{self.collection_prefix}_etc"
+            }
     
     def __enter__(self):
         """

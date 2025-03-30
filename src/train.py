@@ -167,7 +167,7 @@ def train_autogluon_model(
     
     predictor.fit(
         train_data=train_data,
-        time_limit=params["time_limit"],
+        time_limit=30,  # 30초로 줄임
         presets=params["presets"],
         num_stack_levels=params["num_stack_levels"],
         num_bag_folds=params["num_bag_folds"]
@@ -420,7 +420,7 @@ def train_single_target_model(
     
     # Autogluon 설정
     params = {
-        "time_limit": MODEL_PARAMS["autogluon"]["time_limit"],
+        "time_limit": 30,  # 30초로 제한 (테스트용)
         "presets": preset,
         "num_stack_levels": MODEL_PARAMS["autogluon"]["num_stack_levels"],
         "num_bag_folds": MODEL_PARAMS["autogluon"]["num_bag_folds"],
@@ -458,7 +458,7 @@ def train_single_target_model(
         # 모델 학습
         predictor.fit(
             train_data=train_data,
-            time_limit=params["time_limit"],
+            time_limit=30,  # 30초로 줄임
             presets=params["presets"],
             num_stack_levels=params["num_stack_levels"],
             num_bag_folds=params["num_bag_folds"],
@@ -946,10 +946,11 @@ def train_model_for_dataset(dataset_key="dataset3", target_prefix="100", model_t
                     predictor = TabularPredictor(label=target_col, path=model_dir)
                     predictor.fit(
                         train_data=train_data_ag,
-                        time_limit=time_limit_per_model,  # 시간 제한
-                        presets="medium_quality_faster_train",
-                        num_stack_levels=0,  # 스태킹 비활성화
-                        num_bag_folds=2  # 최소 배깅 폴드
+                        time_limit=30,  # 30초로 줄임
+                        presets="good_quality_faster_inference_only_refit",  # 더 빠른 프리셋으로 변경
+                        num_stack_levels=0,  # 스택 레벨 제거
+                        num_bag_folds=1,  # 백 폴드 최소화
+                        eval_metric=MODEL_PARAMS["autogluon"]["eval_metric"]
                     )
                     
                     # Evaluate on validation set

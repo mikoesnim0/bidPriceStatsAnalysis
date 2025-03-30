@@ -27,15 +27,37 @@ def get_model_path(dataset_key="dataset2", target_prefix="010", bin_id=None):
     모델 경로를 표준화된 방식으로 반환합니다.
     
     Args:
-        dataset_key (str): 데이터셋 키 (예: "dataset2")
+        dataset_key (str): 데이터셋 키 (예: "dataset2", "DataSet_2", "2" 등)
         target_prefix (str): 타겟 접두사 (예: "010", "020", "050", "100")
         bin_id (str, optional): 세부 bin ID (예: "001"). None이면 타겟 접두사 레벨까지 경로 반환.
         
     Returns:
         Path: 표준화된 모델 경로
     """
+    # dataset_key 표준화
+    dataset_key = str(dataset_key).lower()
+    
+    # "dataset" 접두사 처리
+    if dataset_key.startswith("dataset"):
+        dataset_key = dataset_key.replace("dataset", "dataset")
+    elif dataset_key.startswith("dataset_"):
+        dataset_key = dataset_key.replace("dataset_", "dataset")
+    # 숫자만 있는 경우
+    elif dataset_key.isdigit():
+        dataset_key = f"dataset{dataset_key}"
+    # DataSet_ 형식 처리
+    elif dataset_key.lower().startswith("dataset_"):
+        dataset_key = f"dataset{dataset_key.split('_')[-1]}"
+        
+    # etc 케이스 처리
+    if "etc" in dataset_key:
+        dataset_key = "datasetetc"
+        
     base_path = MODELS_DIR / "autogluon" / dataset_key / target_prefix
     if bin_id:
+        # bin_id가 문자열이 아니면 문자열로 변환
+        if not isinstance(bin_id, str):
+            bin_id = str(bin_id)
         # models/autogluon/dataset2/010/010_001 형식
         model_path = base_path / f"{target_prefix}_{bin_id}"
         return model_path

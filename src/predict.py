@@ -13,6 +13,7 @@ from typing import Dict, Any, Optional, List
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from src.mongodb_handler import MongoDBHandler
+from src.config import get_model_path
 
 # Configure logging
 logging.basicConfig(
@@ -62,73 +63,95 @@ def load_feature_columns(features_path):
         logger.error(f"❌ Failed to load feature columns from {features_path}: {e}")
         raise
 
-def predict_probabilities(input_data, dataset_key, target_prefix):
+def predict_probabilities(df, dataset_key="dataset2", target_prefix="100"):
     """
-    Make predictions using trained models.
+    Make predictions for each probability bin.
     
     Parameters:
-        input_data (pd.DataFrame): Input data for prediction.
-        dataset_key (str): Dataset key (e.g., "DataSet_3", "DataSet_2").
-        target_prefix (str): Prefix for target columns (e.g., "010", "020", "050", "100").
+        df (pd.DataFrame): Input data
+        dataset_key (str): Dataset key for models to use
+        target_prefix (str): Target column prefix
         
     Returns:
-        pd.DataFrame: Predictions for each bin.
+        pd.DataFrame: Predictions for each bin
     """
-    logger.info(f"Making predictions with {dataset_key} models and target prefix {target_prefix}")
+    logger.info(f"Making predictions with models from dataset: {dataset_key}, prefix: {target_prefix}")
     
-    # Define model directory
-    model_dir = os.path.join("models", dataset_key.lower())
+    # 결과 저장할 DataFrame
+    results = pd.DataFrame(index=df.index)
     
-    # Load feature columns
-    features_path = os.path.join(model_dir, f"{dataset_key.lower()}_features.pkl")
-    feature_cols = load_feature_columns(features_path)
-    
-    # Check if all required feature columns are in input data
-    missing_features = [col for col in feature_cols if col not in input_data.columns]
-    if missing_features:
-        logger.error(f"❌ Missing features in input data: {missing_features}")
-        raise ValueError(f"❌ Input data is missing required features: {missing_features}")
-    
-    # Filter input data to include only required features
-    X = input_data[feature_cols].copy()
-    
-    # Get list of model files
-    model_files = [f for f in os.listdir(model_dir) if f.startswith(f"{dataset_key.lower()}_{target_prefix}_") and f.endswith(".pkl")]
-    
-    if not model_files:
-        logger.error(f"❌ No models found for {dataset_key} with target prefix {target_prefix}")
-        raise FileNotFoundError(f"❌ No models found for {dataset_key} with target prefix {target_prefix}")
-    
-    # Initialize results DataFrame with input data index
-    results = pd.DataFrame(index=X.index)
-    
-    # Load each model and make predictions
-    for model_file in model_files:
-        # Extract bin label from filename
-        bin_label = model_file.split("_")[-1].replace(".pkl", "")
+    try:
+        # AutoGluon 사용 가능 여부 확인
+        try:
+            from autogluon.tabular import TabularPredictor
+        except ImportError:
+            logger.error("AutoGluon is not installed. Install it with: pip install autogluon.tabular")
+            return results
         
-        # Load model
-        model_path = os.path.join(model_dir, model_file)
-        model = load_model(model_path)
+        # 모델 디렉토리 경로
+        from src.config import get_model_path
+        model_dir = get_model_path(dataset_key, target_prefix)
         
-        # Make predictions
-        predictions = model.predict(X)
+        if not os.path.exists(model_dir):
+            logger.warning(f"Model directory not found: {model_dir}")
+            return results
         
-        # Add predictions to results
-        results[f"{target_prefix}_{bin_label}"] = predictions
+        # 모델 디렉토리 확인
+        bin_dirs = []
+        try:
+            bin_dirs = [d for d in os.listdir(model_dir) if os.path.isdir(os.path.join(model_dir, d)) and d.startswith(f"{target_prefix}_")]
+        except Exception as e:
+            logger.error(f"Error listing model directory {model_dir}: {str(e)}")
+            return results
+        
+        if not bin_dirs:
+            logger.warning(f"No model bins found in {model_dir}")
+            return results
+        
+        logger.info(f"Found {len(bin_dirs)} model bins: {bin_dirs}")
+        
+        # 각 bin에 대해 추론
+        for bin_dir_name in bin_dirs:
+            try:
+                bin_path = os.path.join(model_dir, bin_dir_name)
+                
+                # bin ID 추출
+                bin_id = bin_dir_name.split("_")[-1]
+                col_name = f"{target_prefix}_{bin_id}"
+                
+                # 모델 로드
+                logger.info(f"Loading model from {bin_path}")
+                predictor = TabularPredictor.load(bin_path)
+                
+                # 예측 수행
+                try:
+                    predictions = predictor.predict(df)
+                    results[col_name] = predictions
+                    logger.info(f"Successfully predicted {col_name}, shape: {predictions.shape}")
+                except Exception as pred_err:
+                    logger.error(f"Error during prediction for {col_name}: {str(pred_err)}")
+                    # NaN으로 채우기
+                    results[col_name] = float('nan')
+            
+            except Exception as e:
+                logger.error(f"Error loading/using model {bin_dir_name}: {str(e)}")
+        
+        return results
     
-    logger.info(f"Made predictions for {len(results)} samples across {len(model_files)} bins")
-    
-    return results
+    except Exception as e:
+        logger.error(f"Error in predict_probabilities: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return results
 
-def load_and_predict(notice_id, dataset_key="DataSet_3", target_prefix="100", db_name=None, collection_name=None):
+def load_and_predict(notice_id, dataset_key="dataset2", target_prefix="100", db_name="data_preprocessed", collection_name=None):
     """
     Load a specific notice from MongoDB and make predictions.
     
     Parameters:
         notice_id (str): The notice ID to predict for.
-        dataset_key (str): Dataset key to use for prediction models.
-        target_prefix (str): Prefix for target columns.
+        dataset_key (str): Dataset key to use for prediction models (e.g., "dataset2", "2", "DataSet_2").
+        target_prefix (str): Prefix for target columns (e.g., "010", "020", "050", "100").
         db_name (str, optional): Specific database name to use.
         collection_name (str, optional): Specific collection name to use.
         
@@ -137,43 +160,120 @@ def load_and_predict(notice_id, dataset_key="DataSet_3", target_prefix="100", db
     """
     logger.info(f"Making predictions for notice ID: {notice_id}")
     
-    # Connect to MongoDB and load the data
-    with MongoDBHandler() as mongo_handler:
-        if db_name and collection_name:
-            # Use specified database and collection
-            collection = mongo_handler.client[db_name][collection_name]
-        else:
-            # Use default collection based on dataset_key
-            collection_names = mongo_handler.get_default_collection_names()
-            collection = mongo_handler.db[collection_names[dataset_key]]
+    try:
+        # MongoDB에서 데이터 로드
+        with MongoDBHandler(db_name=db_name) as mongo_handler:
+            # 사용 가능한 컬렉션 목록 확인
+            available_collections = mongo_handler.db.list_collection_names()
+            logger.info(f"Available collections: {available_collections}")
+            
+            # 컬렉션 결정
+            if collection_name:
+                # 지정된 컬렉션 사용
+                if collection_name not in available_collections:
+                    raise ValueError(f"Specified collection '{collection_name}' not found in database")
+                collection = mongo_handler.db[collection_name]
+            else:
+                # dataset_key에 따른 컬렉션 형식 준비 (test 컬렉션 우선)
+                collection_patterns = [
+                    f"preprocessed_dataset{dataset_key}_test",
+                    f"preprocessed_dataset{dataset_key}_train",
+                    f"preprocessed_dataset_{dataset_key}_test",
+                    f"preprocessed_dataset_{dataset_key}_train",
+                    f"preprocessed_{dataset_key}_test",
+                    f"preprocessed_{dataset_key}_train",
+                    f"preprocessed_test",
+                    f"preprocessed_train"
+                ]
+                
+                # 사용 가능한 첫 번째 컬렉션 선택
+                selected_collection = next((c for c in collection_patterns if c in available_collections), None)
+                
+                if not selected_collection:
+                    # 대체 방법: 모든 컬렉션에서 해당 공고번호 검색
+                    for coll_name in available_collections:
+                        sample = mongo_handler.db[coll_name].find_one({"공고번호": notice_id})
+                        if sample:
+                            selected_collection = coll_name
+                            logger.info(f"Found notice in collection: {selected_collection}")
+                            break
+                
+                if not selected_collection:
+                    raise ValueError(f"Could not find appropriate collection for dataset_key: {dataset_key}")
+                
+                collection = mongo_handler.db[selected_collection]
+                logger.info(f"Using collection: {selected_collection}")
+            
+            # 공고 데이터 검색
+            notice_data = collection.find_one({"공고번호": notice_id}, {"_id": 0})
+            
+            if not notice_data:
+                # 다른 모든 컬렉션에서도 검색
+                for coll_name in available_collections:
+                    if coll_name == collection.name:
+                        continue
+                    
+                    notice_data = mongo_handler.db[coll_name].find_one({"공고번호": notice_id}, {"_id": 0})
+                    if notice_data:
+                        logger.info(f"Found notice in different collection: {coll_name}")
+                        break
+                
+                if not notice_data:
+                    raise ValueError(f"Notice with ID {notice_id} not found in any collection")
         
-        # Find the notice
-        notice_data = collection.find_one({"공고번호": notice_id}, {"_id": 0})
+        # DataFrame으로 변환 (단일 행)
+        input_df = pd.DataFrame([notice_data])
         
-        if not notice_data:
-            logger.error(f"❌ Notice with ID {notice_id} not found in {collection.name}")
-            raise ValueError(f"❌ Notice with ID {notice_id} not found in {collection.name}")
+        # 모델 디렉토리 확인
+        model_base_dir = get_model_path(dataset_key, target_prefix)
+        if not os.path.exists(model_base_dir):
+            logger.warning(f"Model directory not found: {model_base_dir}")
+            
+            # 다른 dataset_key 시도
+            alternative_keys = ["dataset2", "dataset3", "datasetetc", "2", "3", "etc"]
+            for alt_key in alternative_keys:
+                if alt_key == dataset_key:
+                    continue
+                
+                alt_path = get_model_path(alt_key, target_prefix)
+                if os.path.exists(alt_path):
+                    logger.info(f"Using alternative model path: {alt_path}")
+                    dataset_key = alt_key
+                    model_base_dir = alt_path
+                    break
+        
+        # 예측 수행
+        predictions = predict_probabilities(input_df, dataset_key, target_prefix)
+        
+        # 입력 데이터와 함께 결과 반환
+        result = {
+            "notice_id": notice_id,
+            "dataset_key": dataset_key,
+            "target_prefix": target_prefix,
+            "db_name": db_name,
+            "collection_name": collection.name,
+            "predictions": predictions.to_dict(orient="records")[0] if not predictions.empty else {},
+            "metadata": {k: v for k, v in notice_data.items() if k != "공고번호"}
+        }
+        
+        logger.info(f"Prediction complete for notice ID: {notice_id}")
+        
+        return result
     
-    # Convert to DataFrame (single row)
-    input_df = pd.DataFrame([notice_data])
-    
-    # Make predictions
-    predictions = predict_probabilities(input_df, dataset_key, target_prefix)
-    
-    # Combine with input data for context
-    result = {
-        "notice_id": notice_id,
-        "dataset_key": dataset_key,
-        "target_prefix": target_prefix,
-        "db_name": db_name or mongo_handler.db.name,
-        "collection_name": collection_name or collection.name,
-        "predictions": predictions.to_xdict(orient="records")[0],
-        "metadata": {k: v for k, v in notice_data.items() if k != "공고번호"}
-    }
-    
-    logger.info(f"Prediction complete for notice ID: {notice_id}")
-    
-    return result
+    except Exception as e:
+        logger.error(f"Error in load_and_predict: {str(e)}")
+        # 추적 정보 로깅
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        # 오류 정보 포함한 결과 반환
+        return {
+            "notice_id": notice_id,
+            "dataset_key": dataset_key,
+            "target_prefix": target_prefix,
+            "error": str(e),
+            "success": False
+        }
 
 def save_prediction(prediction, output_dir="results"):
     """

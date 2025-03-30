@@ -250,28 +250,34 @@ def load_processed_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.
         logger.error(f"Error loading preprocessed data: {str(e)}")
         raise
 
-def split_and_save_data(X: pd.DataFrame, Y: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def split_and_save_data(X_train, Y_train, X_test=None, Y_test=None) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    Split the data into training and testing sets and save them to disk.
+    이미 분할된 데이터를 디스크에 저장합니다.
+    혹은 단일 데이터셋이 제공된 경우 분할 후 저장합니다.
     
     Args:
-        X: Features DataFrame
-        Y: Targets DataFrame
+        X_train: 학습 특성 DataFrame
+        Y_train: 학습 타겟 DataFrame
+        X_test: 테스트 특성 DataFrame (없으면 X_train에서 분할)
+        Y_test: 테스트 타겟 DataFrame (없으면 Y_train에서 분할)
         
     Returns:
-        train_X, test_X, train_Y, test_Y - Split DataFrames
+        train_X, test_X, train_Y, test_Y - 분할된 DataFrames
     """
-    logger.info("Splitting and saving data")
+    logger.info("데이터 저장 중")
     
-    # 학습/테스트 분할 (stratify 사용 안 함 - 여러 타겟 컬럼이 있을 수 있음)
-    train_X, test_X, train_Y, test_Y = train_test_split(
-        X, Y, test_size=TEST_SIZE, random_state=RANDOM_SEED
-    )
+    # 데이터가 아직 분할되지 않은 경우 분할 수행
+    if X_test is None or Y_test is None:
+        logger.info("데이터 분할 중 (테스트 데이터가 제공되지 않음)")
+        # 학습/테스트 분할 (stratify 사용 안 함 - 여러 타겟 컬럼이 있을 수 있음)
+        X_train, X_test, Y_train, Y_test = train_test_split(
+            X_train, Y_train, test_size=TEST_SIZE, random_state=RANDOM_SEED
+        )
     
-    logger.info(f"Train features shape: {train_X.shape}")
-    logger.info(f"Test features shape: {test_X.shape}")
-    logger.info(f"Train targets shape: {train_Y.shape}")
-    logger.info(f"Test targets shape: {test_Y.shape}")
+    logger.info(f"Train features shape: {X_train.shape}")
+    logger.info(f"Test features shape: {X_test.shape}")
+    logger.info(f"Train targets shape: {Y_train.shape}")
+    logger.info(f"Test targets shape: {Y_test.shape}")
     
     # 디렉토리 생성
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -284,21 +290,21 @@ def split_and_save_data(X: pd.DataFrame, Y: pd.DataFrame) -> Tuple[pd.DataFrame,
     
     # 특성 데이터 저장
     logger.info(f"Saving train features to {train_file}")
-    train_X.to_csv(train_file, index=False)
+    X_train.to_csv(train_file, index=False)
     
     logger.info(f"Saving test features to {test_file}")
-    test_X.to_csv(test_file, index=False)
+    X_test.to_csv(test_file, index=False)
     
     # 타겟 데이터 저장
     logger.info(f"Saving train targets to {train_targets_file}")
-    train_Y.to_csv(train_targets_file, index=False)
+    Y_train.to_csv(train_targets_file, index=False)
     
     logger.info(f"Saving test targets to {test_targets_file}")
-    test_Y.to_csv(test_targets_file, index=False)
+    Y_test.to_csv(test_targets_file, index=False)
     
     logger.info("Data successfully split and saved")
     
-    return train_X, test_X, train_Y, test_Y
+    return X_train, X_test, Y_train, Y_test
 
 def main():
     """Main function to demonstrate data processing pipeline."""
