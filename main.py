@@ -10,6 +10,7 @@ import time
 from tqdm import tqdm
 from pathlib import Path
 import sys
+import numpy as np
 
 # Add the project root to the Python path
 project_root = Path(__file__).parent
@@ -24,13 +25,14 @@ def main():
     parser.add_argument('--train-only', action='store_true', help='모델 학습만 실행')
     parser.add_argument('--evaluate-only', action='store_true', help='모델 평가만 실행')
     parser.add_argument('--num-targets', type=int, default=30, help='처리할 타겟 컬럼 수 (기본값: 30)')
-    parser.add_argument('--dataset-key', type=str, default='dataset2', help='사용할 데이터셋 키 (기본값: dataset2)')
+    parser.add_argument('--dataset-key', type=str, default='2', help='사용할 데이터셋 키 (기본값: 2)')
     parser.add_argument('--target-prefixes', type=str, default='010,020,050,100', help='처리할 타겟 접두사, 콤마로 구분 (기본값: 010,020,050,100)')
     parser.add_argument('--gpu', type=str, default='True', help='GPU 사용 여부 (True/False)')
     parser.add_argument('--models', type=str, default=None, help='사용할 모델 목록 (콤마로 구분)')
     parser.add_argument('--preset', type=str, default='medium_quality_faster_train', 
                         help='AutoGluon 프리셋')
     parser.add_argument('--verbose', type=int, default=1, help='출력 상세 수준 (0: 간략, 1: 기본, 2: 상세)')
+    parser.add_argument('--generate-targets', action='store_true', help='타겟 컬럼 자동 생성 (없을 경우)')
     args = parser.parse_args()
     
     # GPU 설정 처리
@@ -59,29 +61,209 @@ def main():
             logger.info("Step 1: Loading and preprocessing data...")
             print("📊 데이터 전처리 단계를 시작합니다...")
             
+            # MongoDB에서 직접 데이터 로드
+            try:
+                from src.mongodb_handler import MongoDBHandler
+                
+                # MongoDB 연결
+                handler = MongoDBHandler(db_name='data_preprocessed')
+                handler.connect()
+                
+                # 컬렉션 목록 확인
+                collections = handler.db.list_collection_names()
+                print(f"사용 가능한 컬렉션: {collections}")
+                
+                # 데이터셋에 맞는 컬렉션 형식 준비
+                train_collections = [
+                    f"preprocessed_dataset{dataset_key}_train",  # 기본 형식
+                    f"preprocessed_dataset_{dataset_key}_train", # 언더스코어 형식 
+                    f"preprocessed_{dataset_key}_train",        # 접두사 다른 형식
+                    "preprocessed_train"                        # 기본 컬렉션
+                ]
+                
+                test_collections = [
+                    f"preprocessed_dataset{dataset_key}_test",  # 기본 형식
+                    f"preprocessed_dataset_{dataset_key}_test", # 언더스코어 형식
+                    f"preprocessed_{dataset_key}_test",        # 접두사 다른 형식
+                    "preprocessed_test"                        # 기본 컬렉션
+                ]
+                
+                # 사용 가능한 첫 번째 컬렉션 선택
+                train_collection = next((c for c in train_collections if c in collections), None)
+                test_collection = next((c for c in test_collections if c in collections), None)
+                
+                if train_collection is None:
+                    print("경고: 학습 데이터 컬렉션을 찾을 수 없습니다. 임의 컬렉션을 사용합니다.")
+                    train_collection = collections[0] if collections else None
+                
+                if test_collection is None:
+                    print("경고: 테스트 데이터 컬렉션을 찾을 수 없습니다. 학습 데이터로 대체합니다.")
+                    test_collection = train_collection
+                
+                if train_collection is None:
+                    raise ValueError("데이터 컬렉션을 찾을 수 없습니다.")
+                
+                print(f"학습 데이터 컬렉션: {train_collection}")
+                print(f"테스트 데이터 컬렉션: {test_collection}")
+                
+                # 학습 데이터 로드
+                print(f"컬렉션 {train_collection}에서 학습 데이터 로드 중...")
+                train_data_list = list(handler.db[train_collection].find({}, {'_id': 0}))
+                if not train_data_list:
+                    raise ValueError(f"컬렉션 {train_collection}에 데이터가 없습니다.")
+                train_data = pd.DataFrame(train_data_list)
+                
+                # 테스트 데이터 로드
+                print(f"컬렉션 {test_collection}에서 테스트 데이터 로드 중...")
+                test_data_list = list(handler.db[test_collection].find({}, {'_id': 0}))
+                if not test_data_list:
+                    print(f"경고: 컬렉션 {test_collection}에 데이터가 없습니다. 학습 데이터로 대체합니다.")
+                    test_data = train_data.copy()
+                else:
+                    test_data = pd.DataFrame(test_data_list)
+                
+                # 연결 종료
+                handler.close()
+                
+            except Exception as e:
+                logger.error(f"MongoDB에서 데이터 로드 실패: {str(e)}")
+                raise
+            
+            # 타겟 컬럼 식별 또는 생성
+            def identify_or_create_targets(data, target_prefixes, generate=False):
+                # 타겟 컬럼 식별 (010_, 020_, 050_, 100_ 로 시작하는 컬럼)
+                target_columns = []
+                for prefix in target_prefixes:
+                    prefix_cols = [col for col in data.columns if col.startswith(f"{prefix}_")]
+                    target_columns.extend(prefix_cols)
+                
+                if not target_columns and generate:
+                    print("타겟 컬럼을 찾을 수 없어 자동 생성합니다...")
+                    
+                    # 가상의 타겟 컬럼 생성
+                    # 기준 컬럼 (예: norm_log_기초금액)을 기반으로 변형하여 타겟 생성
+                    base_col = next((col for col in data.columns if 'norm_log' in col), None)
+                    
+                    if base_col is None:
+                        # 아무 수치형 컬럼이나 사용
+                        numeric_cols = data.select_dtypes(include=['number']).columns
+                        if not len(numeric_cols):
+                            raise ValueError("타겟 생성에 사용할 수치형 컬럼이 없습니다.")
+                        base_col = numeric_cols[0]
+                    
+                    # 각 타겟 접두사에 대해 여러 타겟 생성
+                    target_df = pd.DataFrame(index=data.index)
+                    for prefix in target_prefixes:
+                        for i in range(1, 6):  # 각 접두사별로 5개 생성
+                            col_name = f"{prefix}_{i:03d}"
+                            # 기본 컬럼에 무작위성 추가
+                            target_df[col_name] = data[base_col] * (0.8 + np.random.rand() * 0.4) + np.random.randn(len(data)) * 0.1
+                    
+                    # 두 데이터프레임 결합
+                    result_data = pd.concat([data, target_df], axis=1)
+                    target_columns = target_df.columns.tolist()
+                    
+                    return result_data, target_columns
+                
+                return data, target_columns
+            
             # 전처리 단계 진행 표시기
-            preprocessing_steps = ['데이터 로드', '중복 제거', '결측치 처리', '학습/테스트 분할', '데이터 저장']
+            preprocessing_steps = ['데이터 로드', '타겟 처리', '결측치 처리', '데이터 분할', '데이터 저장']
             preprocess_pbar = tqdm(preprocessing_steps, desc="📊 데이터 전처리", position=0, leave=True)
             
-            # 데이터 로드
+            # 데이터 로드 완료
             preprocess_pbar.set_description("📊 데이터 로드 중")
-            data = data_processing.load_data()
             preprocess_pbar.update(1)
             
-            # 중복 제거 및 전처리
-            preprocess_pbar.set_description("📊 데이터 전처리 중 (중복 제거)")
-            X, Y = data_processing.preprocess_data(data)
+            # 타겟 처리
+            preprocess_pbar.set_description("📊 타겟 처리 중")
+            train_data, train_target_columns = identify_or_create_targets(
+                train_data, target_prefixes, generate=args.generate_targets
+            )
+            test_data, test_target_columns = identify_or_create_targets(
+                test_data, target_prefixes, generate=args.generate_targets
+            )
+            
+            # 공통 타겟 컬럼만 사용
+            common_targets = sorted(list(set(train_target_columns) & set(test_target_columns)))
+            if not common_targets:
+                raise ValueError("학습 및 테스트 데이터에 공통된 타겟 컬럼이 없습니다!")
+            
+            print(f"사용할 타겟 컬럼: {len(common_targets)}개")
+            if args.verbose > 1:
+                print(f"타겟 컬럼 목록: {common_targets}")
+            
+            # 특성과 타겟 분리
+            train_X = train_data.drop(columns=common_targets, errors='ignore')
+            train_Y = train_data[common_targets]
+            test_X = test_data.drop(columns=common_targets, errors='ignore')
+            test_Y = test_data[common_targets]
+            
             preprocess_pbar.update(1)
             
             # 결측치 처리
             preprocess_pbar.set_description("📊 결측치 처리 중")
-            time.sleep(1)  # 실제로는 필요 없지만 진행 상황을 보여주기 위한 지연
+            
+            # NaN 값 확인
+            nan_count_X_train = train_X.isna().sum().sum()
+            nan_count_Y_train = train_Y.isna().sum().sum()
+            
+            if nan_count_X_train > 0:
+                print(f"학습 특성 데이터에 {nan_count_X_train}개의 NaN 값이 있습니다. 처리 중...")
+                # 수치형 컬럼은 중앙값으로, 범주형 컬럼은 최빈값으로 채우기
+                for col in train_X.columns:
+                    if pd.api.types.is_numeric_dtype(train_X[col]):
+                        train_X[col] = train_X[col].fillna(train_X[col].median())
+                    else:
+                        train_X[col] = train_X[col].fillna(train_X[col].mode()[0] if not train_X[col].mode().empty else "UNKNOWN")
+            
+            if nan_count_Y_train > 0:
+                print(f"학습 타겟 데이터에 {nan_count_Y_train}개의 NaN 값이 있습니다. 해당 행 제거 중...")
+                # 타겟 값에 NaN이 있는 행 제거
+                nan_rows = train_Y.isna().any(axis=1)
+                train_X = train_X[~nan_rows].reset_index(drop=True)
+                train_Y = train_Y[~nan_rows].reset_index(drop=True)
+            
+            # 테스트 데이터도 동일하게 처리
+            nan_count_X_test = test_X.isna().sum().sum()
+            nan_count_Y_test = test_Y.isna().sum().sum()
+            
+            if nan_count_X_test > 0:
+                print(f"테스트 특성 데이터에 {nan_count_X_test}개의 NaN 값이 있습니다. 처리 중...")
+                for col in test_X.columns:
+                    if pd.api.types.is_numeric_dtype(test_X[col]):
+                        test_X[col] = test_X[col].fillna(test_X[col].median())
+                    else:
+                        test_X[col] = test_X[col].fillna(test_X[col].mode()[0] if not test_X[col].mode().empty else "UNKNOWN")
+            
+            if nan_count_Y_test > 0:
+                print(f"테스트 타겟 데이터에 {nan_count_Y_test}개의 NaN 값이 있습니다. 해당 행 제거 중...")
+                nan_rows = test_Y.isna().any(axis=1)
+                test_X = test_X[~nan_rows].reset_index(drop=True)
+                test_Y = test_Y[~nan_rows].reset_index(drop=True)
+            
             preprocess_pbar.update(1)
             
-            # 학습/테스트 분할 및 저장
-            preprocess_pbar.set_description("📊 데이터 분할 중")
-            train_X, test_X, train_Y, test_Y = data_processing.split_and_save_data(X, Y)
-            preprocess_pbar.update(2)
+            # 공통 특성 컬럼만 사용
+            common_features = sorted(list(set(train_X.columns) & set(test_X.columns)))
+            if not common_features:
+                raise ValueError("학습 및 테스트 데이터에 공통된 특성 컬럼이 없습니다!")
+            
+            train_X = train_X[common_features]
+            test_X = test_X[common_features]
+            
+            # 데이터 형식 일치 확인
+            for col in common_features:
+                if train_X[col].dtype != test_X[col].dtype:
+                    # 형식이 다르면 문자열로 통일
+                    print(f"컬럼 {col}의 데이터 형식이 일치하지 않아 문자열로 변환합니다.")
+                    train_X[col] = train_X[col].astype(str)
+                    test_X[col] = test_X[col].astype(str)
+            
+            # 데이터 저장
+            preprocess_pbar.set_description("📊 데이터 저장 중")
+            train_X, test_X, train_Y, test_Y = data_processing.split_and_save_data(train_X, train_Y, test_X, test_Y)
+            preprocess_pbar.update(1)
             
             print(f"\n✅ 데이터 전처리 완료! 학습 데이터: {train_X.shape}, 테스트 데이터: {test_X.shape}\n")
             
