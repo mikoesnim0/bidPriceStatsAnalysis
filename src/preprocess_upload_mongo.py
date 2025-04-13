@@ -4,13 +4,10 @@
 """
 import os
 import argparse
-import time
 import logging
-import pandas as pd
-from tqdm import tqdm
 from dotenv import load_dotenv
 from preprocess_pipeline import PreprocessingPipeline
-from mongodb_handler import MongoDBHandler
+from statsModelsPredict.src.db_config.mongodb_handler import MongoDBHandler
 from pipeline_visualizer import create_visualizer
 
 # 로깅 설정

@@ -16,7 +16,7 @@ import numpy as np
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from src import config, data_processing, train, evaluate, predict, utils
+from src import config, data_processing, train, evaluate, utils
 
 def main():
     # 명령행 인자 파싱
@@ -63,7 +63,7 @@ def main():
             
             # MongoDB에서 직접 데이터 로드
             try:
-                from src.mongodb_handler import MongoDBHandler
+                from statsModelsPredict.src.db_config.mongodb_handler import MongoDBHandler
                 
                 # MongoDB 연결
                 handler = MongoDBHandler(db_name='data_preprocessed')

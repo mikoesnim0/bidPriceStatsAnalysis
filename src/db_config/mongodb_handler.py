@@ -6,6 +6,9 @@ from dotenv import load_dotenv
 import numpy as np
 import urllib.parse
 
+from src.db_config.local import connect_mongodb_via_ssh
+from src.db_config.production import init_mongodb
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -16,9 +19,7 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# MongoDB connection details
-# URI 형식: mongodb://[username:password@]host:port/database[?options]
-# URI에 DB 이름이 포함된 경우와 MONGO_DB 환경변수가 다를 경우 주의
+
 MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017')
 MONGO_DB = os.getenv('MONGO_DB', 'gfcon')
 MONGO_COLLECTION_PREFIX = os.getenv('MONGO_COLLECTION_PREFIX', 'preprocessed')
@@ -29,80 +30,20 @@ MONGODB_PASSWORD = os.getenv('MONGODB_PASSWORD')
 MONGODB_AUTH_SOURCE = os.getenv('MONGODB_AUTH_SOURCE', 'admin')
 
 class MongoDBHandler:
-    """
-    A class to handle MongoDB operations for bid price analysis project.
-    """
-    
-    def __init__(self, uri=None, db_name=None, collection_prefix=None, username=None, password=None, auth_source=None):
-        """
-        Initialize the MongoDB handler.
-        
-        Parameters:
-            uri (str, optional): MongoDB connection URI. Defaults to env variable.
-            db_name (str, optional): Database name. Defaults to env variable.
-            collection_prefix (str, optional): Collection name prefix. Defaults to env variable.
-            username (str, optional): MongoDB username if not in URI. Defaults to env variable.
-            password (str, optional): MongoDB password if not in URI. Defaults to env variable.
-            auth_source (str, optional): Authentication source. Defaults to 'admin'.
-        """
-        self.uri = uri or MONGO_URI
-        self.db_name = db_name or MONGO_DB
-        self.collection_prefix = collection_prefix or MONGO_COLLECTION_PREFIX
-        self.username = username or MONGODB_USER
-        self.password = password or MONGODB_PASSWORD
-        self.auth_source = auth_source or MONGODB_AUTH_SOURCE
-        self.client = None
-        self.db = None
-        
-        # URI에 인증 정보가 없고, 별도로 제공된 경우 URI 생성
-        if self.username and self.password and '@' not in self.uri:
-            # URL 인코딩하여 특수문자 처리
-            encoded_password = urllib.parse.quote_plus(self.password)
-            parts = self.uri.split('://')
-            if len(parts) == 2:
-                protocol, address = parts
-                if '/' in address:  # 호스트 부분과 DB 부분이 있는 경우
-                    host_part, db_part = address.split('/', 1)
-                    self.uri = f"{protocol}://{self.username}:{encoded_password}@{host_part}/{db_part}"
-                    if '?' not in self.uri:
-                        self.uri += f"?authSource={self.auth_source}"
-                    elif 'authSource=' not in self.uri:
-                        self.uri += f"&authSource={self.auth_source}"
-                else:  # 호스트 부분만 있는 경우
-                    self.uri = f"{protocol}://{self.username}:{encoded_password}@{address}/{self.db_name}?authSource={self.auth_source}"
-        
-        logger.info(f"🔗 MongoDB URI configured (sanitized): {self._sanitize_uri(self.uri)}")
-    
-    def _sanitize_uri(self, uri):
-        """비밀번호를 가리고 URI 반환"""
-        if '@' in uri:
-            parts = uri.split('@')
-            auth_part = parts[0].split('://')
-            if len(auth_part) > 1 and ':' in auth_part[1]:
-                # 비밀번호 부분 마스킹
-                username_part, _ = auth_part[1].split(':', 1)
-                return f"{auth_part[0]}://{username_part}:****@{parts[1]}"
-        return uri
+    def __init__(self):
+        self.server, self.client = None, None
+        ENV = os.getenv('DJANGO_ENV')
+
+        if ENV == 'production':
+            self.client = init_mongodb()
+        elif ENV == 'local':
+            self.server, self.client = connect_mongodb_via_ssh()
+
     
     def connect(self):
-        """
-        Connect to MongoDB.
-        
-        Returns:
-            self: For method chaining.
-        """
         try:
-            # 연결 시 타임아웃 설정 추가
-            self.client = MongoClient(self.uri, serverSelectionTimeoutMS=5000)
-            
-            # 실제 연결 테스트 (이때 인증 실패가 발생할 수 있음)
-            self.client.server_info()
-            
-            # 연결 성공 후 DB 객체 획득
             self.db = self.client[self.db_name]
-            
-            logger.info(f"✅ Connected to MongoDB database: {self.db_name}")
-            return self
+
         except Exception as e:
             # 보다 구체적인 오류 메시지 제공
             if "Authentication failed" in str(e):

@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, List
 # Import our modules
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from src.mongodb_handler import MongoDBHandler
+from db_config.mongodb_handler import MongoDBHandler
 from src.config import get_model_path
 
 # Configure logging
@@ -161,90 +161,90 @@ def load_and_predict(notice_id, dataset_key="dataset2", target_prefix="100", db_
     logger.info(f"Making predictions for notice ID: {notice_id}")
     
     try:
-        # MongoDB에서 데이터 로드
-        with MongoDBHandler(db_name=db_name) as mongo_handler:
-            # 사용 가능한 컬렉션 목록 확인
-            available_collections = mongo_handler.db.list_collection_names()
-            logger.info(f"Available collections: {available_collections}")
-            
-            # 컬렉션 결정
-            if collection_name:
-                # 지정된 컬렉션 사용
-                if collection_name not in available_collections:
-                    raise ValueError(f"Specified collection '{collection_name}' not found in database")
-                collection = mongo_handler.db[collection_name]
-            else:
-                # dataset_key에 따른 컬렉션 형식 준비 (test 컬렉션 우선)
-                collection_patterns = [
-                    f"preprocessed_dataset{dataset_key}_test",
-                    f"preprocessed_dataset{dataset_key}_train",
-                    f"preprocessed_dataset_{dataset_key}_test",
-                    f"preprocessed_dataset_{dataset_key}_train",
-                    f"preprocessed_{dataset_key}_test",
-                    f"preprocessed_{dataset_key}_train",
-                    f"preprocessed_test",
-                    f"preprocessed_train"
-                ]
-                
-                # 사용 가능한 첫 번째 컬렉션 선택
-                selected_collection = next((c for c in collection_patterns if c in available_collections), None)
-                
-                if not selected_collection:
-                    # 대체 방법: 모든 컬렉션에서 해당 공고번호 검색
-                    for coll_name in available_collections:
-                        sample = mongo_handler.db[coll_name].find_one({"공고번호": notice_id})
-                        if sample:
-                            selected_collection = coll_name
-                            logger.info(f"Found notice in collection: {selected_collection}")
-                            break
-                
-                if not selected_collection:
-                    raise ValueError(f"Could not find appropriate collection for dataset_key: {dataset_key}")
-                
-                collection = mongo_handler.db[selected_collection]
-                logger.info(f"Using collection: {selected_collection}")
-            
-            # 공고 데이터 검색
-            notice_data = collection.find_one({"공고번호": notice_id}, {"_id": 0})
-            
-            if not notice_data:
-                # 다른 모든 컬렉션에서도 검색
+        mongo_handler = MongoDBHandler()
+        db = mongo_handler.client[db_name]
+
+        available_collections = db.list_collection_names()
+        logger.info(f"Available collections: {available_collections}")
+
+        # 컬렉션 결정
+        if collection_name:
+            # 지정된 컬렉션 사용
+            if collection_name not in available_collections:
+                raise ValueError(f"Specified collection '{collection_name}' not found in database")
+            collection = db[collection_name]
+        else:
+            # dataset_key에 따른 컬렉션 형식 준비 (test 컬렉션 우선)
+            collection_patterns = [
+                f"preprocessed_dataset{dataset_key}_test",
+                f"preprocessed_dataset{dataset_key}_train",
+                f"preprocessed_dataset_{dataset_key}_test",
+                f"preprocessed_dataset_{dataset_key}_train",
+                f"preprocessed_{dataset_key}_test",
+                f"preprocessed_{dataset_key}_train",
+                f"preprocessed_test",
+                f"preprocessed_train"
+            ]
+
+            # 사용 가능한 첫 번째 컬렉션 선택
+            selected_collection = next((c for c in collection_patterns if c in available_collections), None)
+
+            if not selected_collection:
+                # 대체 방법: 모든 컬렉션에서 해당 공고번호 검색
                 for coll_name in available_collections:
-                    if coll_name == collection.name:
-                        continue
-                    
-                    notice_data = mongo_handler.db[coll_name].find_one({"공고번호": notice_id}, {"_id": 0})
-                    if notice_data:
-                        logger.info(f"Found notice in different collection: {coll_name}")
+                    sample = db[coll_name].find_one({"공고번호": notice_id})
+                    if sample:
+                        selected_collection = coll_name
+                        logger.info(f"Found notice in collection: {selected_collection}")
                         break
-                
-                if not notice_data:
-                    raise ValueError(f"Notice with ID {notice_id} not found in any collection")
-        
+
+            if not selected_collection:
+                raise ValueError(f"Could not find appropriate collection for dataset_key: {dataset_key}")
+
+            collection = db[selected_collection]
+            logger.info(f"Using collection: {selected_collection}")
+
+        # 공고 데이터 검색
+        notice_data = collection.find_one({"공고번호": notice_id}, {"_id": 0})
+
+        if not notice_data:
+            # 다른 모든 컬렉션에서도 검색
+            for coll_name in available_collections:
+                if coll_name == collection.name:
+                    continue
+
+                notice_data = db[coll_name].find_one({"공고번호": notice_id}, {"_id": 0})
+                if notice_data:
+                    logger.info(f"Found notice in different collection: {coll_name}")
+                    break
+
+            if not notice_data:
+                raise ValueError(f"Notice with ID {notice_id} not found in any collection")
+
         # DataFrame으로 변환 (단일 행)
         input_df = pd.DataFrame([notice_data])
-        
+
         # 모델 디렉토리 확인
         model_base_dir = get_model_path(dataset_key, target_prefix)
         if not os.path.exists(model_base_dir):
             logger.warning(f"Model directory not found: {model_base_dir}")
-            
+
             # 다른 dataset_key 시도
             alternative_keys = ["dataset2", "dataset3", "datasetetc", "2", "3", "etc"]
             for alt_key in alternative_keys:
                 if alt_key == dataset_key:
                     continue
-                
+
                 alt_path = get_model_path(alt_key, target_prefix)
                 if os.path.exists(alt_path):
                     logger.info(f"Using alternative model path: {alt_path}")
                     dataset_key = alt_key
                     model_base_dir = alt_path
                     break
-        
+
         # 예측 수행
         predictions = predict_probabilities(input_df, dataset_key, target_prefix)
-        
+
         # 입력 데이터와 함께 결과 반환
         result = {
             "notice_id": notice_id,
@@ -255,9 +255,9 @@ def load_and_predict(notice_id, dataset_key="dataset2", target_prefix="100", db_
             "predictions": predictions.to_dict(orient="records")[0] if not predictions.empty else {},
             "metadata": {k: v for k, v in notice_data.items() if k != "공고번호"}
         }
-        
+
         logger.info(f"Prediction complete for notice ID: {notice_id}")
-        
+
         return result
     
     except Exception as e:

@@ -8,9 +8,8 @@ from data_loader import DataLoader
 from preprocessing.cleaner import DataCleaner
 from preprocessing.transformer import DataTransformer
 from preprocessing.feature_eng import FeatureEngineer
-from mongodb_handler import MongoDBHandler
+from statsModelsPredict.src.db_config.mongodb_handler import MongoDBHandler
 import argparse
-import json
 
 # 로깅 설정
 logging.basicConfig(

@@ -1,4 +1,4 @@
-from src.mongodb_handler import MongoDBHandler
+from statsModelsPredict.src.db_config.mongodb_handler import MongoDBHandler
 handler = MongoDBHandler()
 handler.connect()
 collections = ["preprocessed", "preprocessed_3", "preprocessed_etc"]

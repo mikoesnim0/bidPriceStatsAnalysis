@@ -1,8 +1,7 @@
-import os
 import logging
 import pandas as pd
 from dotenv import load_dotenv
-from mongodb_handler import MongoDBHandler
+from statsModelsPredict.src.db_config.mongodb_handler import MongoDBHandler
 
 # Configure logging
 logging.basicConfig(
